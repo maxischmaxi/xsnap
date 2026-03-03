@@ -21,8 +21,7 @@ xsnap test --pipeline
 ```
 
 `xsnap init` creates:
-- `xsnap.config.jsonc` — global config
-- `xsnap.schema.json` — JSON Schema for editor autocompletion
+- `xsnap.config.jsonc` — global config (with `$schema` pointing to the latest JSON Schema on GitHub)
 - `tests/example.xsnap.json` — example test file
 - `__snapshots__/` — directory structure for baseline/current/updated images
 
@@ -30,11 +29,11 @@ xsnap test --pipeline
 
 ### Global Config (`xsnap.config.jsonc`)
 
-JSONC (JSON with comments) is supported. Add `"$schema": "./xsnap.schema.json"` for editor autocompletion.
+JSONC (JSON with comments) is supported. The `$schema` field enables editor autocompletion and validation.
 
 ```jsonc
 {
-  "$schema": "./xsnap.schema.json",
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json",
   // Base URL prepended to all test URLs
   "baseUrl": "http://localhost:3000",
 
@@ -273,7 +272,7 @@ Scaffolds a new xsnap project in the current directory.
 xsnap init
 ```
 
-Creates `xsnap.config.jsonc`, `xsnap.schema.json`, `tests/example.xsnap.json`, and the `__snapshots__/` directory structure.
+Creates `xsnap.config.jsonc`, `tests/example.xsnap.json`, and the `__snapshots__/` directory structure. The config references the JSON Schema directly from GitHub for always up-to-date editor autocompletion.
 
 ## Snapshot Directory Structure
 
@@ -319,6 +318,6 @@ git config core.hooksPath .githooks
 - **ratatui** + **crossterm** — terminal UI
 - **clap** — CLI argument parsing
 - **serde** + **json_comments** — JSONC config parsing
-- **schemars** — JSON Schema generation from Rust types
+- **schemars** — JSON Schema generation (schema is committed to repo, referenced via GitHub raw URL)
 - **tokio** — async runtime with semaphore-based browser pool
 - **reqwest** — HTTP client for Chrome downloads

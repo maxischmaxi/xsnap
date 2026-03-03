@@ -1,0 +1,567 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GlobalConfig",
+  "type": "object",
+  "properties": {
+    "baseUrl": {
+      "type": "string"
+    },
+    "browser": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BrowserConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "defaultSizes": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "default": null,
+      "items": {
+        "$ref": "#/$defs/Size"
+      }
+    },
+    "diffPixelColor": {
+      "$ref": "#/$defs/Color",
+      "default": {
+        "b": 255,
+        "g": 0,
+        "r": 255
+      }
+    },
+    "fullScreen": {
+      "type": "boolean",
+      "default": true
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Action"
+        }
+      },
+      "default": {}
+    },
+    "httpHeaders": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "ignorePatterns": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "parallelism": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "default": null,
+      "minimum": 0
+    },
+    "retry": {
+      "type": "integer",
+      "format": "uint32",
+      "default": 1,
+      "minimum": 0
+    },
+    "snapshotDirectory": {
+      "type": "string",
+      "default": "__snapshots__"
+    },
+    "testPattern": {
+      "type": "string",
+      "default": "tests/**/*.xsnap.json"
+    },
+    "tests": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TestConfig"
+      }
+    },
+    "threshold": {
+      "type": "integer",
+      "format": "uint32",
+      "default": 0,
+      "minimum": 0
+    }
+  },
+  "required": [
+    "baseUrl"
+  ],
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "wait"
+            },
+            "timeout": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "action",
+            "timeout"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "click"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "selector"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "type"
+            },
+            "selector": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "selector",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "scroll"
+            },
+            "pxAmount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "default": null
+            },
+            "selector": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "forcePseudoState"
+            },
+            "active": {
+              "type": "boolean",
+              "default": false
+            },
+            "focus": {
+              "type": "boolean",
+              "default": false
+            },
+            "hover": {
+              "type": "boolean",
+              "default": false
+            },
+            "selector": {
+              "type": "string"
+            },
+            "visited": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "action",
+            "selector"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "action": {
+              "type": "string",
+              "const": "function"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "name"
+          ]
+        }
+      ]
+    },
+    "BrowserConfig": {
+      "type": "object",
+      "properties": {
+        "args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "Color": {
+      "type": "object",
+      "properties": {
+        "b": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "g": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "r": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "r",
+        "g",
+        "b"
+      ]
+    },
+    "IgnoreRegion": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "x1": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "x2": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "y1": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "y2": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "x1",
+            "y1",
+            "x2",
+            "y2"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selector"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "@": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "default": null,
+              "items": {
+                "type": "string"
+              }
+            },
+            "selectorAll": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "selectorAll"
+          ]
+        }
+      ]
+    },
+    "Size": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "width",
+        "height"
+      ]
+    },
+    "TestConfig": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
+        },
+        "browser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BrowserConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expectedResponseCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "httpHeaders": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "ignore": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/IgnoreRegion"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "only": {
+          "type": "boolean",
+          "default": false
+        },
+        "retry": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "sizes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/Size"
+          }
+        },
+        "skip": {
+          "type": "boolean",
+          "default": false
+        },
+        "threshold": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ]
+    }
+  }
+}

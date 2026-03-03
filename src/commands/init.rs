@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use crate::config::schema::generate_schema;
-
 const DEFAULT_CONFIG: &str = r#"{
-  "$schema": "./xsnap.schema.json",
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json",
   "baseUrl": "http://localhost:3000",
   "browser": {
     "version": "auto"
@@ -41,10 +39,6 @@ pub fn run_init() -> anyhow::Result<()> {
     }
     std::fs::write(config_path, DEFAULT_CONFIG)?;
     println!("Created xsnap.config.jsonc");
-
-    let schema = generate_schema();
-    std::fs::write("xsnap.schema.json", &schema)?;
-    println!("Created xsnap.schema.json");
 
     std::fs::create_dir_all("tests")?;
     let example_path = Path::new("tests/example.xsnap.json");
