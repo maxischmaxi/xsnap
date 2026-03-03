@@ -21,9 +21,7 @@ pub fn run_cleanup(opts: CleanupOptions) -> anyhow::Result<()> {
     let config_path = Path::new(&opts.config);
     let global = load_global_config(config_path)?;
 
-    let base_dir = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let test_files = discover_test_files(base_dir, &global.test_pattern, &global.ignore_patterns)?;
 
     let mut all_tests: Vec<TestConfig> = Vec::new();

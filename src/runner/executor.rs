@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -6,10 +6,12 @@ use std::time::Instant;
 use image::ImageReader;
 use tokio::sync::mpsc;
 
-use crate::browser::actions::{capture_screenshot, execute_action, navigate, set_viewport};
+use crate::browser::actions::{
+    capture_screenshot, execute_action, navigate, set_extra_headers, set_viewport,
+};
 use crate::browser::pool::BrowserPool;
 use crate::config::types::{Action, GlobalConfig, Size, TestConfig};
-use crate::diff::compare::{compare_images, CompareResult};
+use crate::diff::compare::{CompareResult, compare_images};
 use crate::diff::composite::create_composite;
 use crate::error::XsnapError;
 use crate::runner::result::{RunSummary, TestOutcome, TestResult};
@@ -39,10 +41,7 @@ pub struct TestTask {
 /// Progress update sent to the UI.
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
-    TestStarted {
-        name: String,
-        size: String,
-    },
+    TestStarted { name: String, size: String },
     TestCompleted(TestResult),
     RunCompleted(RunSummary),
 }
@@ -55,19 +54,33 @@ pub enum ProgressEvent {
 ///
 /// When an `Action::Function { name }` is encountered, it is replaced by the
 /// actions defined in the `functions` map under that name. The expansion is
-/// recursive so functions may reference other functions.
-pub fn expand_actions(
+/// recursive so functions may reference other functions. Circular references
+/// are detected and skipped to prevent infinite recursion.
+pub fn expand_actions(actions: &[Action], functions: &HashMap<String, Vec<Action>>) -> Vec<Action> {
+    let mut seen = HashSet::new();
+    expand_actions_inner(actions, functions, &mut seen)
+}
+
+fn expand_actions_inner(
     actions: &[Action],
     functions: &HashMap<String, Vec<Action>>,
+    seen: &mut HashSet<String>,
 ) -> Vec<Action> {
     let mut result = Vec::new();
     for action in actions {
         match action {
             Action::Function { name, .. } => {
+                if seen.contains(name) {
+                    // Circular reference detected, skip to prevent infinite recursion.
+                    continue;
+                }
                 if let Some(fn_actions) = functions.get(name) {
+                    // Track this function name to detect circular references.
+                    seen.insert(name.clone());
                     // Recursively expand in case functions reference other functions.
-                    let expanded = expand_actions(fn_actions, functions);
+                    let expanded = expand_actions_inner(fn_actions, functions, seen);
                     result.extend(expanded);
+                    seen.remove(name);
                 } else {
                     // If the function is not found, keep the action as-is.
                     // Validation should catch this earlier, but we are defensive.
@@ -172,34 +185,22 @@ pub fn snapshot_filename(test_name: &str, size: &Size) -> String {
 ///
 /// The `no_create` flag controls whether new snapshots can be created when no
 /// baseline exists.
-pub async fn execute_test_task(
-    pool: &BrowserPool,
-    task: &TestTask,
-    no_create: bool,
-) -> TestResult {
+pub async fn execute_test_task(pool: &BrowserPool, task: &TestTask, no_create: bool) -> TestResult {
     let start = Instant::now();
 
-    // Handle skipped tests.
-    if task.test.skip {
-        return TestResult {
-            test_name: task.test.name.clone(),
-            size_name: task.size.name.clone(),
-            width: task.size.width,
-            height: task.size.height,
-            outcome: TestOutcome::Skipped,
-            duration: start.elapsed(),
-            retries_used: 0,
-            warnings: vec![],
-        };
-    }
-
     let filename = snapshot_filename(&task.test.name, &task.size);
-    let snapshot_path = task.snapshot_dir.join(&filename);
-    let diff_filename = format!(
-        "{}-{}-{}x{}-diff.png",
-        task.test.name, task.size.name, task.size.width, task.size.height
-    );
-    let diff_path = task.snapshot_dir.join(&diff_filename);
+
+    // Use subdirectory structure: __base_images__ for baselines, __updated__ for
+    // failed current screenshots and diffs, __current__ for current screenshots.
+    let base_images_dir = task.snapshot_dir.join("__base_images__");
+    let current_dir = task.snapshot_dir.join("__current__");
+    let updated_dir = task.snapshot_dir.join("__updated__");
+
+    let snapshot_path = base_images_dir.join(&filename);
+
+    let diff_stem = filename.trim_end_matches(".png");
+    let diff_filename = format!("{}-diff.png", diff_stem);
+    let diff_path = updated_dir.join(&diff_filename);
 
     // Retry loop.
     let mut last_outcome = TestOutcome::Error {
@@ -213,7 +214,16 @@ pub async fn execute_test_task(
             retries_used = attempt;
         }
 
-        match execute_single_attempt(pool, task, &snapshot_path, &diff_path, no_create).await {
+        match execute_single_attempt(
+            pool,
+            task,
+            &snapshot_path,
+            &diff_path,
+            &current_dir,
+            no_create,
+        )
+        .await
+        {
             Ok(outcome) => {
                 if outcome.is_pass() || attempt == task.retry {
                     last_outcome = outcome;
@@ -252,10 +262,11 @@ async fn execute_single_attempt(
     task: &TestTask,
     snapshot_path: &Path,
     diff_path: &Path,
+    current_dir: &Path,
     no_create: bool,
 ) -> Result<TestOutcome, XsnapError> {
     // Acquire a page from the pool.
-    let (page, _permit) = pool.acquire().await?;
+    let (page, permit) = pool.acquire().await?;
 
     // Set viewport.
     set_viewport(&page, &task.size).await?;
@@ -281,8 +292,11 @@ async fn execute_single_attempt(
     // Capture screenshot.
     let screenshot_bytes = capture_screenshot(&page, task.full_screen).await?;
 
-    // Drop page permit explicitly (page goes out of scope with _permit).
-    drop(_permit);
+    // Close the page first (browser interaction done), then release the permit.
+    // This ensures the permit is held for the entire duration of browser interaction
+    // but released before CPU-only image comparison work.
+    drop(page);
+    drop(permit);
 
     // Decode screenshot into an image.
     let current_img = image::load_from_memory(&screenshot_bytes)
@@ -334,6 +348,13 @@ async fn execute_single_attempt(
     match compare_images(&baseline_img, &current_img, task.threshold)? {
         CompareResult::Pass => Ok(TestOutcome::Pass),
         CompareResult::Fail { score, diff_image } => {
+            // Ensure __updated__ directory exists for diff and failed screenshots.
+            if let Some(parent) = diff_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
+                    message: format!("Failed to create updated directory: {}", e),
+                })?;
+            }
+
             // Save the diff composite if we have a diff image.
             let diff_path_str = diff_path.to_string_lossy().to_string();
 
@@ -344,14 +365,21 @@ async fn execute_single_attempt(
                 }
             }
 
-            // Save the current screenshot alongside for reference.
-            let current_filename = format!(
-                "{}-{}-{}x{}-current.png",
-                task.test.name, task.size.name, task.size.width, task.size.height
-            );
-            let current_path = task.snapshot_dir.join(&current_filename);
+            // Save the current screenshot into __current__ for reference.
+            let filename = snapshot_filename(&task.test.name, &task.size);
+            std::fs::create_dir_all(current_dir).map_err(|e| XsnapError::ScreenshotFailed {
+                message: format!("Failed to create current directory: {}", e),
+            })?;
+            let current_path = current_dir.join(&filename);
             if let Err(e) = current_img.save(&current_path) {
                 eprintln!("Warning: failed to save current screenshot: {}", e);
+            }
+
+            // Also save the current screenshot into __updated__ for the approve workflow.
+            let updated_dir = diff_path.parent().unwrap();
+            let updated_path = updated_dir.join(&filename);
+            if let Err(e) = current_img.save(&updated_path) {
+                eprintln!("Warning: failed to save updated screenshot: {}", e);
             }
 
             Ok(TestOutcome::Fail {

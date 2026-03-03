@@ -75,10 +75,7 @@ pub fn run_approve(opts: ApproveOptions) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!(
-        "Found {} updated snapshot(s) to review:",
-        candidates.len()
-    );
+    println!("Found {} updated snapshot(s) to review:", candidates.len());
 
     // Ensure base directory exists.
     std::fs::create_dir_all(&base_dir)?;

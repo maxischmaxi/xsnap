@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+use chromiumoxide::cdp::browser_protocol::network::{Headers, SetExtraHttpHeadersParams};
 use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
 use chromiumoxide::page::{Page, ScreenshotParams};
 
@@ -30,6 +33,32 @@ pub async fn navigate(page: &Page, url: &str) -> Result<(), XsnapError> {
         .map_err(|e| XsnapError::NavigationFailed {
             url: url.to_string(),
             message: format!("{}", e),
+        })?;
+
+    Ok(())
+}
+
+/// Sets extra HTTP headers to be sent with every request from this page.
+pub async fn set_extra_headers(
+    page: &Page,
+    headers: &HashMap<String, String>,
+) -> Result<(), XsnapError> {
+    if headers.is_empty() {
+        return Ok(());
+    }
+
+    let header_map: serde_json::Map<String, serde_json::Value> = headers
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+
+    let params =
+        SetExtraHttpHeadersParams::new(Headers::new(serde_json::Value::Object(header_map)));
+
+    page.execute(params)
+        .await
+        .map_err(|e| XsnapError::CdpError {
+            message: format!("Failed to set HTTP headers: {}", e),
         })?;
 
     Ok(())
@@ -116,17 +145,12 @@ pub async fn execute_action(
                     message: format!("Failed to find element '{}': {}", selector, e),
                 })?;
 
-            element
-                .click()
-                .await
-                .map_err(|e| XsnapError::CdpError {
-                    message: format!("Failed to click element '{}': {}", selector, e),
-                })?;
+            element.click().await.map_err(|e| XsnapError::CdpError {
+                message: format!("Failed to click element '{}': {}", selector, e),
+            })?;
         }
 
-        Action::Type {
-            selector, text, ..
-        } => {
+        Action::Type { selector, text, .. } => {
             let element = page
                 .find_element(selector)
                 .await
@@ -134,12 +158,9 @@ pub async fn execute_action(
                     message: format!("Failed to find element '{}': {}", selector, e),
                 })?;
 
-            element
-                .click()
-                .await
-                .map_err(|e| XsnapError::CdpError {
-                    message: format!("Failed to focus element '{}': {}", selector, e),
-                })?;
+            element.click().await.map_err(|e| XsnapError::CdpError {
+                message: format!("Failed to focus element '{}': {}", selector, e),
+            })?;
 
             element
                 .type_str(text)
@@ -172,11 +193,9 @@ pub async fn execute_action(
             } else if let Some(amount) = px_amount {
                 // Scroll the window by a pixel amount.
                 let js = format!("window.scrollBy(0, {})", amount);
-                page.evaluate(js)
-                    .await
-                    .map_err(|e| XsnapError::CdpError {
-                        message: format!("Failed to scroll by {} px: {}", amount, e),
-                    })?;
+                page.evaluate(js).await.map_err(|e| XsnapError::CdpError {
+                    message: format!("Failed to scroll by {} px: {}", amount, e),
+                })?;
             }
         }
 
@@ -226,19 +245,15 @@ pub async fn execute_action(
 
             let node_id = element.node_id;
 
-            let params =
-                chromiumoxide::cdp::browser_protocol::css::ForcePseudoStateParams::new(
-                    node_id,
-                    states.iter().map(|s| s.to_string()).collect(),
-                );
+            let params = chromiumoxide::cdp::browser_protocol::css::ForcePseudoStateParams::new(
+                node_id,
+                states.iter().map(|s| s.to_string()).collect(),
+            );
 
             page.execute(params)
                 .await
                 .map_err(|e| XsnapError::CdpError {
-                    message: format!(
-                        "Failed to force pseudo state on '{}': {}",
-                        selector, e
-                    ),
+                    message: format!("Failed to force pseudo state on '{}': {}", selector, e),
                 })?;
         }
 

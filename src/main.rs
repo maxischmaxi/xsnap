@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use xsnap::error::XsnapError;
 
 #[derive(Parser)]
 #[command(name = "xsnap")]
@@ -79,6 +80,16 @@ enum Commands {
     Init,
 }
 
+/// Extract an exit code from an anyhow::Error by downcasting to XsnapError.
+/// Falls back to exit code 4 for unknown errors.
+fn exit_code_from_error(e: &anyhow::Error) -> i32 {
+    if let Some(xsnap_err) = e.downcast_ref::<XsnapError>() {
+        xsnap_err.exit_code()
+    } else {
+        4
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -107,7 +118,7 @@ async fn main() {
                 Ok(code) => code,
                 Err(e) => {
                     eprintln!("Error: {e}");
-                    4
+                    exit_code_from_error(&e)
                 }
             }
         }
@@ -116,39 +127,38 @@ async fn main() {
             all,
             filter,
         } => {
-            match xsnap::commands::approve::run_approve(
-                xsnap::commands::approve::ApproveOptions {
-                    config,
-                    all,
-                    filter,
-                },
-            ) {
+            match xsnap::commands::approve::run_approve(xsnap::commands::approve::ApproveOptions {
+                config,
+                all,
+                filter,
+            }) {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("Error: {e}");
-                    2
+                    exit_code_from_error(&e)
                 }
             }
         }
         Commands::Cleanup { config } => {
-            match xsnap::commands::cleanup::run_cleanup(
-                xsnap::commands::cleanup::CleanupOptions { config },
-            ) {
+            match xsnap::commands::cleanup::run_cleanup(xsnap::commands::cleanup::CleanupOptions {
+                config,
+            }) {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("Error: {e}");
-                    2
+                    exit_code_from_error(&e)
                 }
             }
         }
         Commands::Migrate { source, target } => {
-            match xsnap::commands::migrate::run_migrate(
-                xsnap::commands::migrate::MigrateOptions { source, target },
-            ) {
+            match xsnap::commands::migrate::run_migrate(xsnap::commands::migrate::MigrateOptions {
+                source,
+                target,
+            }) {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("Error: {e}");
-                    2
+                    exit_code_from_error(&e)
                 }
             }
         }
@@ -156,7 +166,7 @@ async fn main() {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("Error: {e}");
-                4
+                exit_code_from_error(&e)
             }
         },
     };

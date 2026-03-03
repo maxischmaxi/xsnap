@@ -4,11 +4,11 @@ use std::time::Duration;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use ratatui::{
+    DefaultTerminal, Frame,
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table, TableState},
-    DefaultTerminal, Frame,
 };
 use tokio::sync::mpsc;
 
@@ -107,11 +107,7 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
     // -- Progress gauge --
     let progress_label = format!("{}/{}", state.completed, state.total_tasks);
     let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Progress "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" Progress "))
         .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
         .ratio(state.progress_ratio())
         .label(progress_label);
@@ -126,7 +122,11 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
         Cell::from("Duration"),
         Cell::from("Retries"),
     ])
-    .style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow));
+    .style(
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Yellow),
+    );
 
     let rows: Vec<Row> = state
         .results
@@ -137,7 +137,10 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
                 TestOutcome::Created => ("NEW ", Style::default().fg(Color::Cyan)),
                 TestOutcome::Fail { .. } => ("FAIL", Style::default().fg(Color::Red)),
                 TestOutcome::Skipped => ("SKIP", Style::default().fg(Color::Yellow)),
-                TestOutcome::Error { .. } => ("ERR ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                TestOutcome::Error { .. } => (
+                    "ERR ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
             };
 
             let size_str = format!("{}-{}x{}", r.size_name, r.width, r.height);
@@ -169,11 +172,7 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
         ],
     )
     .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Results "),
-    )
+    .block(Block::default().borders(Borders::ALL).title(" Results "))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(table, chunks[1], &mut state.table_state);
@@ -184,15 +183,30 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
             Span::raw("Total: "),
             Span::styled(format!("{}", s.total), Style::default().bold()),
             Span::raw("  "),
-            Span::styled(format!("{} passed", s.passed), Style::default().fg(Color::Green)),
+            Span::styled(
+                format!("{} passed", s.passed),
+                Style::default().fg(Color::Green),
+            ),
             Span::raw("  "),
-            Span::styled(format!("{} failed", s.failed), Style::default().fg(Color::Red)),
+            Span::styled(
+                format!("{} failed", s.failed),
+                Style::default().fg(Color::Red),
+            ),
             Span::raw("  "),
-            Span::styled(format!("{} created", s.created), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("{} created", s.created),
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw("  "),
-            Span::styled(format!("{} skipped", s.skipped), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                format!("{} skipped", s.skipped),
+                Style::default().fg(Color::Yellow),
+            ),
             Span::raw("  "),
-            Span::styled(format!("{} errors", s.errors), Style::default().fg(Color::Red)),
+            Span::styled(
+                format!("{} errors", s.errors),
+                Style::default().fg(Color::Red),
+            ),
             Span::raw(format!("  ({:.1}s)", s.duration.as_secs_f64())),
             Span::raw("  |  Press q to quit"),
         ])
@@ -214,11 +228,8 @@ fn render(frame: &mut Frame, state: &mut TuiState) {
         ])
     };
 
-    let summary_bar = Paragraph::new(summary_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Summary "),
-    );
+    let summary_bar = Paragraph::new(summary_text)
+        .block(Block::default().borders(Borders::ALL).title(" Summary "));
 
     frame.render_widget(summary_bar, chunks[2]);
 }

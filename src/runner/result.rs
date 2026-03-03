@@ -23,7 +23,10 @@ pub enum TestOutcome {
 
 impl TestOutcome {
     pub fn is_pass(&self) -> bool {
-        matches!(self, TestOutcome::Pass | TestOutcome::Created | TestOutcome::Skipped)
+        matches!(
+            self,
+            TestOutcome::Pass | TestOutcome::Created | TestOutcome::Skipped
+        )
     }
 }
 

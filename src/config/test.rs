@@ -8,11 +8,10 @@ pub fn load_test_file(path: &Path) -> Result<Vec<TestConfig>, XsnapError> {
         path: path.display().to_string(),
     })?;
 
-    let tests: Vec<TestConfig> = serde_json::from_str(&content).map_err(|e| {
-        XsnapError::ConfigInvalid {
+    let tests: Vec<TestConfig> =
+        serde_json::from_str(&content).map_err(|e| XsnapError::ConfigInvalid {
             message: format!("{}: {}", path.display(), e),
-        }
-    })?;
+        })?;
 
     Ok(tests)
 }
@@ -20,7 +19,7 @@ pub fn load_test_file(path: &Path) -> Result<Vec<TestConfig>, XsnapError> {
 pub fn discover_test_files(
     base_dir: &Path,
     pattern: &str,
-    _ignore_patterns: &[String],
+    ignore_patterns: &[String],
 ) -> Result<Vec<PathBuf>, XsnapError> {
     let full_pattern = base_dir.join(pattern).display().to_string();
     let paths: Vec<PathBuf> = glob::glob(&full_pattern)
@@ -28,6 +27,12 @@ pub fn discover_test_files(
             message: format!("Invalid test pattern '{}': {}", pattern, e),
         })?
         .filter_map(|entry| entry.ok())
+        .filter(|path| {
+            let path_str = path.display().to_string();
+            !ignore_patterns
+                .iter()
+                .any(|pattern| path_str.contains(pattern))
+        })
         .collect();
 
     Ok(paths)

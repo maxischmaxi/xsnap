@@ -1,5 +1,5 @@
 use image::{Rgb, RgbImage};
-use xsnap::diff::compare::{compare_images, CompareResult};
+use xsnap::diff::compare::{CompareResult, compare_images};
 use xsnap::diff::composite::create_composite;
 
 fn create_solid_image(width: u32, height: u32, color: [u8; 3]) -> RgbImage {
@@ -27,7 +27,10 @@ fn test_different_images_fail() {
     let result = compare_images(&baseline, &current, 0).expect("comparison should succeed");
     match result {
         CompareResult::Fail { score, diff_image } => {
-            assert!(score < 1.0, "score should be less than 1.0 for different images");
+            assert!(
+                score < 1.0,
+                "score should be less than 1.0 for different images"
+            );
             assert!(diff_image.is_some(), "diff image should be present");
         }
         CompareResult::Pass => panic!("completely different images should not pass"),
@@ -92,8 +95,16 @@ fn test_create_composite_dimensions() {
 
     let composite = create_composite(&baseline, &diff, &current);
 
-    assert_eq!(composite.width(), width * 3, "composite width should be 3x input width");
-    assert_eq!(composite.height(), height, "composite height should match input height");
+    assert_eq!(
+        composite.width(),
+        width * 3,
+        "composite width should be 3x input width"
+    );
+    assert_eq!(
+        composite.height(),
+        height,
+        "composite height should match input height"
+    );
 }
 
 #[test]

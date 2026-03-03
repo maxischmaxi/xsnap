@@ -87,10 +87,7 @@ fn test_validate_valid_config() {
     }))
     .unwrap();
 
-    let tests = vec![
-        test_config("home page", "/"),
-        test_with_function,
-    ];
+    let tests = vec![test_config("home page", "/"), test_with_function];
 
     let result = validate_config(&global, &tests);
     assert!(result.is_ok());

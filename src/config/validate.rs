@@ -3,12 +3,21 @@ use std::collections::HashSet;
 use crate::config::types::{Action, GlobalConfig, TestConfig};
 use crate::error::XsnapError;
 
-pub fn validate_config(
-    global: &GlobalConfig,
-    tests: &[TestConfig],
-) -> Result<(), XsnapError> {
+pub fn validate_config(global: &GlobalConfig, tests: &[TestConfig]) -> Result<(), XsnapError> {
     validate_unique_names(tests)?;
+    validate_test_names(tests)?;
     validate_function_references(global, tests)?;
+    Ok(())
+}
+
+fn validate_test_names(tests: &[TestConfig]) -> Result<(), XsnapError> {
+    for test in tests {
+        if test.name.contains('/') || test.name.contains('\\') || test.name.contains("..") {
+            return Err(XsnapError::ConfigInvalid {
+                message: format!("Test name '{}' contains unsafe path characters", test.name),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -32,11 +41,10 @@ fn validate_function_references(
         if let Some(actions) = &test.actions {
             for action in actions {
                 if let Action::Function { name, .. } = action
-                    && !global.functions.contains_key(name) {
-                        return Err(XsnapError::UndefinedFunction {
-                            name: name.clone(),
-                        });
-                    }
+                    && !global.functions.contains_key(name)
+                {
+                    return Err(XsnapError::UndefinedFunction { name: name.clone() });
+                }
             }
         }
     }

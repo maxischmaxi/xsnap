@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use crate::error::XsnapError;
 
 /// URL for Chrome for Testing latest version metadata.
-#[allow(dead_code)]
 const CHROME_LATEST_URL: &str = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
 
 /// Returns the platform-specific cache directory for storing Chromium downloads.
@@ -20,11 +19,31 @@ pub fn cache_dir() -> PathBuf {
 
 /// Resolves a chromium version string.
 ///
-/// If the version is "auto", it resolves to "latest".
-/// Otherwise, the version string is passed through as-is.
-pub fn resolve_chromium_version(version: &str) -> Result<String, XsnapError> {
+/// If the version is "auto", it fetches the latest stable version from the
+/// Chrome for Testing API. Otherwise, the version string is passed through as-is.
+pub async fn resolve_chromium_version(version: &str) -> Result<String, XsnapError> {
     if version == "auto" {
-        Ok("latest".into())
+        let response = reqwest::get(CHROME_LATEST_URL).await.map_err(|e| {
+            XsnapError::BrowserDownloadFailed {
+                message: format!("Failed to fetch latest Chrome version: {}", e),
+            }
+        })?;
+
+        let json: serde_json::Value =
+            response
+                .json()
+                .await
+                .map_err(|e| XsnapError::BrowserDownloadFailed {
+                    message: format!("Failed to parse Chrome version JSON: {}", e),
+                })?;
+
+        let ver = json["channels"]["Stable"]["version"]
+            .as_str()
+            .ok_or_else(|| XsnapError::BrowserDownloadFailed {
+                message: "Could not find Stable channel version in response".into(),
+            })?;
+
+        Ok(ver.to_string())
     } else {
         Ok(version.to_string())
     }
@@ -49,7 +68,7 @@ pub fn get_download_url(version: &str, platform: &str) -> String {
 ///
 /// Returns the path to the chrome binary.
 pub async fn ensure_chromium(version: &str) -> Result<PathBuf, XsnapError> {
-    let resolved = resolve_chromium_version(version)?;
+    let resolved = resolve_chromium_version(version).await?;
     let cache = cache_dir().join(&resolved);
 
     if cache.exists() {

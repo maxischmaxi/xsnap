@@ -1,4 +1,4 @@
-use image::{imageops, RgbImage};
+use image::{RgbImage, imageops};
 
 /// Create a side-by-side composite image showing baseline, diff, and current.
 ///

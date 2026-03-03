@@ -262,9 +262,7 @@ fn test_all_action_types() {
     });
     let type_action: Action = serde_json::from_value(type_json).unwrap();
     match type_action {
-        Action::Type {
-            selector, text, ..
-        } => {
+        Action::Type { selector, text, .. } => {
             assert_eq!(selector, "input#email");
             assert_eq!(text, "test@example.com");
         }

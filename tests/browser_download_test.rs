@@ -1,14 +1,8 @@
 use xsnap::browser::download::{cache_dir, get_download_url, resolve_chromium_version};
 
-#[test]
-fn test_resolve_auto_version() {
-    let result = resolve_chromium_version("auto").unwrap();
-    assert_eq!(result, "latest");
-}
-
-#[test]
-fn test_resolve_specific_version() {
-    let result = resolve_chromium_version("120.0.6099.109").unwrap();
+#[tokio::test]
+async fn test_resolve_specific_version() {
+    let result = resolve_chromium_version("120.0.6099.109").await.unwrap();
     assert_eq!(result, "120.0.6099.109");
 }
 

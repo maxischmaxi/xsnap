@@ -52,10 +52,7 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
             skipped_count += 1;
         }
     } else {
-        println!(
-            "No osnap.config.yaml found in {}",
-            source_dir.display()
-        );
+        println!("No osnap.config.yaml found in {}", source_dir.display());
     }
 
     // 2. Look for *.osnap.yaml test files -> convert to *.xsnap.json
@@ -64,15 +61,10 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
     if test_files.is_empty() {
         println!("No *.osnap.yaml test files found.");
     } else {
-        println!(
-            "\nFound {} OSnap test file(s):",
-            test_files.len()
-        );
+        println!("\nFound {} OSnap test file(s):", test_files.len());
 
         for test_file in &test_files {
-            let relative = test_file
-                .strip_prefix(source_dir)
-                .unwrap_or(test_file);
+            let relative = test_file.strip_prefix(source_dir).unwrap_or(test_file);
 
             // Convert filename: foo.osnap.yaml -> foo.xsnap.json
             let new_name = relative

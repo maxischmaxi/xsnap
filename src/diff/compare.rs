@@ -47,12 +47,11 @@ pub fn compare_images(
         });
     }
 
-    let result =
-        image_compare::rgb_hybrid_compare(baseline, current).map_err(|e| {
-            XsnapError::DiffFailed {
-                message: format!("Comparison failed: {}", e),
-            }
-        })?;
+    let result = image_compare::rgb_hybrid_compare(baseline, current).map_err(|e| {
+        XsnapError::DiffFailed {
+            message: format!("Comparison failed: {}", e),
+        }
+    })?;
 
     let total_pixels = baseline.width() * baseline.height();
     let diff_pixels = ((1.0 - result.score) * total_pixels as f64) as u32;
@@ -61,6 +60,7 @@ pub fn compare_images(
         Ok(CompareResult::Pass)
     } else {
         // Convert the similarity map to a viewable RGB image
+        // TODO: Apply user-configured diff_pixel_color instead of using default color map
         let diff_image = result.image.to_color_map().to_rgb8();
         Ok(CompareResult::Fail {
             score: result.score,

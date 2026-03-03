@@ -44,9 +44,11 @@ impl BrowserPool {
             }
         }
 
-        let browser_config = builder.build().map_err(|e| XsnapError::BrowserLaunchFailed {
-            message: format!("Invalid browser config: {}", e),
-        })?;
+        let browser_config = builder
+            .build()
+            .map_err(|e| XsnapError::BrowserLaunchFailed {
+                message: format!("Invalid browser config: {}", e),
+            })?;
 
         let (browser, mut handler) =
             Browser::launch(browser_config)
@@ -55,15 +57,24 @@ impl BrowserPool {
                     message: format!("Failed to launch browser: {}", e),
                 })?;
 
-        let handle = tokio::spawn(async move {
-            while let Some(_event) = handler.next().await {}
-        });
+        let handle = tokio::spawn(async move { while let Some(_event) = handler.next().await {} });
 
         Ok(Self {
             browser: Arc::new(browser),
             semaphore: Arc::new(Semaphore::new(parallelism)),
             _handler: handle,
         })
+    }
+
+    /// Gracefully shuts down the browser pool.
+    ///
+    /// Drops the browser instance (closing it when all references are gone)
+    /// and waits for the handler task to finish.
+    pub async fn shutdown(self) {
+        // Browser is dropped when Arc<Browser> reaches zero references.
+        // The handler task will end when the browser closes.
+        drop(self.browser);
+        let _ = self._handler.await;
     }
 
     /// Acquires a new browser page from the pool.
@@ -73,22 +84,19 @@ impl BrowserPool {
     /// and the owned permit; the permit should be held for the duration of
     /// page usage and dropped when done.
     pub async fn acquire(&self) -> Result<(Page, tokio::sync::OwnedSemaphorePermit), XsnapError> {
-        let permit = self
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| XsnapError::BrowserLaunchFailed {
+        let permit = self.semaphore.clone().acquire_owned().await.map_err(|_| {
+            XsnapError::BrowserLaunchFailed {
                 message: "Pool semaphore closed".into(),
-            })?;
+            }
+        })?;
 
-        let page = self
-            .browser
-            .new_page("about:blank")
-            .await
-            .map_err(|e| XsnapError::CdpError {
-                message: format!("Failed to create page: {}", e),
-            })?;
+        let page =
+            self.browser
+                .new_page("about:blank")
+                .await
+                .map_err(|e| XsnapError::CdpError {
+                    message: format!("Failed to create page: {}", e),
+                })?;
 
         Ok((page, permit))
     }

@@ -9,7 +9,7 @@ use crate::config::global::load_global_config;
 use crate::config::test::{discover_test_files, load_test_file};
 use crate::config::types::TestConfig;
 use crate::config::validate::validate_config;
-use crate::runner::executor::{build_test_tasks, run_all, ProgressEvent};
+use crate::runner::executor::{ProgressEvent, build_test_tasks, run_all};
 use crate::ui::pipeline::{print_result, print_summary};
 use crate::ui::tui::run_tui;
 
@@ -33,9 +33,7 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
     let global = load_global_config(config_path)?;
 
     // 2. Discover and load test files.
-    let base_dir = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let test_files = discover_test_files(base_dir, &global.test_pattern, &global.ignore_patterns)?;
 
     let mut all_tests: Vec<TestConfig> = Vec::new();
@@ -53,7 +51,12 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
     validate_config(&global, &all_tests)?;
 
     // 4. Apply flags: no_only, no_skip, filter.
-    let tests = apply_flags(all_tests, opts.no_only, opts.no_skip, opts.filter.as_deref());
+    let tests = apply_flags(
+        all_tests,
+        opts.no_only,
+        opts.no_skip,
+        opts.filter.as_deref(),
+    );
 
     // If no tests remain after filtering, exit early.
     if tests.is_empty() {
@@ -84,14 +87,8 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         .or(global.parallelism)
         .unwrap_or_else(|| num_cpus::get().max(1));
 
-    let pool = Arc::new(
-        BrowserPool::new(
-            &chrome_path,
-            parallelism,
-            global.browser.as_ref(),
-        )
-        .await?,
-    );
+    let pool =
+        Arc::new(BrowserPool::new(&chrome_path, parallelism, global.browser.as_ref()).await?);
 
     // 7. Run tests.
     let summary = if opts.pipeline {
@@ -102,9 +99,8 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
 
         // Spawn the runner.
         let pool_clone = Arc::clone(&pool);
-        let runner_handle = tokio::spawn(async move {
-            run_all(pool_clone, tasks, opts.no_create, Some(tx)).await
-        });
+        let runner_handle =
+            tokio::spawn(async move { run_all(pool_clone, tasks, opts.no_create, Some(tx)).await });
 
         // Print results as they arrive.
         while let Some(event) = rx.recv().await {
@@ -128,9 +124,8 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
 
         // Spawn the runner.
         let pool_clone = Arc::clone(&pool);
-        let runner_handle = tokio::spawn(async move {
-            run_all(pool_clone, tasks, opts.no_create, Some(tx)).await
-        });
+        let runner_handle =
+            tokio::spawn(async move { run_all(pool_clone, tasks, opts.no_create, Some(tx)).await });
 
         // Run the TUI (blocks until user quits).
         let tui_result = run_tui(total_tasks, rx).await;
@@ -146,7 +141,12 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         summary
     };
 
-    // 8. Return exit code.
+    // 8. Shut down the browser gracefully.
+    if let Ok(pool) = Arc::try_unwrap(pool) {
+        pool.shutdown().await;
+    }
+
+    // 9. Return exit code.
     if summary.failed > 0 || summary.errors > 0 {
         Ok(1)
     } else {
@@ -212,20 +212,14 @@ mod tests {
 
     #[test]
     fn test_apply_flags_no_filters() {
-        let tests = vec![
-            make_test("a", false, false),
-            make_test("b", false, false),
-        ];
+        let tests = vec![make_test("a", false, false), make_test("b", false, false)];
         let result = apply_flags(tests, false, false, None);
         assert_eq!(result.len(), 2);
     }
 
     #[test]
     fn test_apply_flags_only() {
-        let tests = vec![
-            make_test("a", true, false),
-            make_test("b", false, false),
-        ];
+        let tests = vec![make_test("a", true, false), make_test("b", false, false)];
         let result = apply_flags(tests, false, false, None);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "a");
@@ -233,20 +227,14 @@ mod tests {
 
     #[test]
     fn test_apply_flags_no_only_disables_only() {
-        let tests = vec![
-            make_test("a", true, false),
-            make_test("b", false, false),
-        ];
+        let tests = vec![make_test("a", true, false), make_test("b", false, false)];
         let result = apply_flags(tests, true, false, None);
         assert_eq!(result.len(), 2);
     }
 
     #[test]
     fn test_apply_flags_skip() {
-        let tests = vec![
-            make_test("a", false, true),
-            make_test("b", false, false),
-        ];
+        let tests = vec![make_test("a", false, true), make_test("b", false, false)];
         let result = apply_flags(tests, false, false, None);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "b");
@@ -254,10 +242,7 @@ mod tests {
 
     #[test]
     fn test_apply_flags_no_skip_disables_skip() {
-        let tests = vec![
-            make_test("a", false, true),
-            make_test("b", false, false),
-        ];
+        let tests = vec![make_test("a", false, true), make_test("b", false, false)];
         let result = apply_flags(tests, false, true, None);
         assert_eq!(result.len(), 2);
     }
