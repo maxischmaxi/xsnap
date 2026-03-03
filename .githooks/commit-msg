@@ -1,0 +1,30 @@
+#!/bin/sh
+# Enforce conventional commit format: type(scope): description
+# Valid types: feat, fix, perf, refactor, docs, chore, ci, build, test, style
+
+set -e
+
+MSG=$(head -1 "$1")
+
+# Allow merge commits
+if echo "$MSG" | grep -qE "^Merge "; then
+    exit 0
+fi
+
+PATTERN="^(feat|fix|perf|refactor|docs|chore|ci|build|test|style)(\(.+\))?: .+"
+
+if ! echo "$MSG" | grep -qE "$PATTERN"; then
+    echo "ERROR: Commit message does not follow Conventional Commits format."
+    echo ""
+    echo "  Expected: <type>[optional scope]: <description>"
+    echo ""
+    echo "  Types: feat, fix, perf, refactor, docs, chore, ci, build, test, style"
+    echo ""
+    echo "  Examples:"
+    echo "    feat: add dark mode support"
+    echo "    fix(runner): handle empty test files"
+    echo "    chore: bump version to 0.2.0"
+    echo ""
+    echo "  Your message: $MSG"
+    exit 1
+fi
