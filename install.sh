@@ -40,8 +40,12 @@ echo "Downloading xsnap ${VERSION} for ${OS}/${ARCH}..."
 curl -fsSL "$URL" -o /tmp/xsnap
 
 echo "Installing to ${INSTALL_DIR}/xsnap..."
-install -d "$INSTALL_DIR"
-install -m 755 /tmp/xsnap "${INSTALL_DIR}/xsnap"
+SUDO=""
+if [ ! -w "$INSTALL_DIR" ] 2>/dev/null && command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+fi
+$SUDO install -d "$INSTALL_DIR"
+$SUDO install -m 755 /tmp/xsnap "${INSTALL_DIR}/xsnap"
 rm -f /tmp/xsnap
 
 echo "Verifying installation..."
