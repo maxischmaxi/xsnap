@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="maxischmaxi/xsnap"
-INSTALL_DIR="${XSNAP_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${XSNAP_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${1:-latest}"
 
 # Detect OS

@@ -20,16 +20,16 @@ curl -fsSL https://raw.githubusercontent.com/maxischmaxi/xsnap/main/install.sh |
 
 ```bash
 # Linux x64
-curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-x64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-x64 -o ~/.local/bin/xsnap && chmod +x ~/.local/bin/xsnap
 
 # Linux arm64
-curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-arm64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-arm64 -o ~/.local/bin/xsnap && chmod +x ~/.local/bin/xsnap
 
 # macOS Intel
-curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-x64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-x64 -o ~/.local/bin/xsnap && chmod +x ~/.local/bin/xsnap
 
 # macOS Apple Silicon
-curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-arm64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-arm64 -o ~/.local/bin/xsnap && chmod +x ~/.local/bin/xsnap
 ```
 
 ### Docker
