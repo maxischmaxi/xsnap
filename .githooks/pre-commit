@@ -15,4 +15,9 @@ if ! cargo clippy -- -D warnings 2>/dev/null; then
     exit 1
 fi
 
+# Stage Cargo.lock if it was modified by fmt/clippy (e.g. after version bump)
+if ! git diff --quiet Cargo.lock 2>/dev/null; then
+    git add Cargo.lock
+fi
+
 echo "Pre-commit checks passed."
