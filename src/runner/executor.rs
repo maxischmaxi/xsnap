@@ -271,6 +271,16 @@ async fn execute_single_attempt(
     // Set viewport.
     set_viewport(&page, &task.size).await?;
 
+    // Set extra HTTP headers before navigation.
+    set_extra_headers(&page, &task.http_headers).await?;
+
+    // TODO: Check expected_response_code if set.
+    // This requires capturing the HTTP response from navigation.
+
+    // TODO: Apply ignore regions by masking areas before comparison.
+    // Coordinate regions: mask pixel areas directly.
+    // Selector regions: query element bounds via CDP, then mask.
+
     // Build full URL.
     let full_url = if task.test.url.starts_with("http://") || task.test.url.starts_with("https://")
     {
