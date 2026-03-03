@@ -277,8 +277,8 @@ async fn run_tui_inner(
 
             // Handle keyboard events.
             Some(Ok(event)) = event_stream.next() => {
-                if let Event::Key(key) = event {
-                    if key.kind == KeyEventKind::Press {
+                if let Event::Key(key) = event
+                    && key.kind == KeyEventKind::Press {
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 // Return summary if available, otherwise a default.
@@ -304,7 +304,6 @@ async fn run_tui_inner(
                             _ => {}
                         }
                     }
-                }
             }
 
             // If both channels are closed, break.

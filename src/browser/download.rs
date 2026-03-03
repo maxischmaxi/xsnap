@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::XsnapError;
 
@@ -84,7 +84,7 @@ fn current_platform() -> String {
 }
 
 /// Searches recursively for the chrome binary inside a directory.
-fn find_chrome_binary(dir: &PathBuf) -> Result<PathBuf, XsnapError> {
+fn find_chrome_binary(dir: &Path) -> Result<PathBuf, XsnapError> {
     let binary_name = if cfg!(target_os = "windows") {
         "chrome.exe"
     } else {

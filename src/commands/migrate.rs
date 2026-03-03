@@ -124,10 +124,8 @@ fn find_osnap_test_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let yml_pattern = dir.join("**/*.osnap.yml").display().to_string();
 
     for pattern in &[yaml_pattern, yml_pattern] {
-        for entry in glob::glob(pattern)? {
-            if let Ok(path) = entry {
-                results.push(path);
-            }
+        for path in glob::glob(pattern)?.flatten() {
+            results.push(path);
         }
     }
 

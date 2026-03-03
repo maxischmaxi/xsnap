@@ -31,13 +31,12 @@ fn validate_function_references(
     for test in tests {
         if let Some(actions) = &test.actions {
             for action in actions {
-                if let Action::Function { name, .. } = action {
-                    if !global.functions.contains_key(name) {
+                if let Action::Function { name, .. } = action
+                    && !global.functions.contains_key(name) {
                         return Err(XsnapError::UndefinedFunction {
                             name: name.clone(),
                         });
                     }
-                }
             }
         }
     }
