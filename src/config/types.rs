@@ -232,7 +232,7 @@ fn default_true() -> bool {
 }
 
 fn default_test_pattern() -> String {
-    "tests/**/*.xsnap.json".into()
+    "tests/**/*.xsnap.jsonc".into()
 }
 
 fn default_snapshot_dir() -> String {

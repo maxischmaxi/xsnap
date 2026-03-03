@@ -42,14 +42,14 @@ fn test_discover_test_files() {
     fs::create_dir_all(&nested_dir).unwrap();
 
     // Create matching files
-    fs::write(tests_dir.join("home.xsnap.json"), r#"{"tests":[]}"#).unwrap();
-    fs::write(nested_dir.join("dashboard.xsnap.json"), r#"{"tests":[]}"#).unwrap();
+    fs::write(tests_dir.join("home.xsnap.jsonc"), r#"{"tests":[]}"#).unwrap();
+    fs::write(nested_dir.join("dashboard.xsnap.jsonc"), r#"{"tests":[]}"#).unwrap();
 
     // Create non-matching files
     fs::write(tests_dir.join("readme.md"), "# readme").unwrap();
     fs::write(tests_dir.join("config.json"), "{}").unwrap();
 
-    let pattern = "tests/**/*.xsnap.json";
+    let pattern = "tests/**/*.xsnap.jsonc";
     let paths = discover_test_files(tmp_dir.path(), pattern, &[]).unwrap();
 
     assert_eq!(paths.len(), 2);
@@ -59,6 +59,6 @@ fn test_discover_test_files() {
         .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect();
 
-    assert!(filenames.contains(&"home.xsnap.json".to_string()));
-    assert!(filenames.contains(&"dashboard.xsnap.json".to_string()));
+    assert!(filenames.contains(&"home.xsnap.jsonc".to_string()));
+    assert!(filenames.contains(&"dashboard.xsnap.jsonc".to_string()));
 }

@@ -7,7 +7,7 @@ const DEFAULT_CONFIG: &str = r#"{
     "version": "auto"
   },
   "fullScreen": true,
-  "testPattern": "tests/**/*.xsnap.json",
+  "testPattern": "tests/**/*.xsnap.jsonc",
   "ignorePatterns": ["node_modules"],
   "defaultSizes": [
     { "name": "desktop", "width": 1920, "height": 1080 },
@@ -44,10 +44,10 @@ pub fn run_init() -> anyhow::Result<()> {
     println!("Created xsnap.config.jsonc");
 
     std::fs::create_dir_all("tests")?;
-    let example_path = Path::new("tests/example.xsnap.json");
+    let example_path = Path::new("tests/example.xsnap.jsonc");
     if !example_path.exists() {
         std::fs::write(example_path, EXAMPLE_TEST)?;
-        println!("Created tests/example.xsnap.json");
+        println!("Created tests/example.xsnap.jsonc");
     }
 
     std::fs::create_dir_all("__snapshots__/__base_images__")?;

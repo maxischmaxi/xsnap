@@ -12,7 +12,7 @@ fn test_deserialize_minimal_global_config() {
     assert_eq!(config.base_url, "http://localhost:3000");
     assert!(config.browser.is_none());
     assert!(config.full_screen);
-    assert_eq!(config.test_pattern, "tests/**/*.xsnap.json");
+    assert_eq!(config.test_pattern, "tests/**/*.xsnap.jsonc");
     assert!(config.ignore_patterns.is_empty());
     assert!(config.default_sizes.is_none());
     assert!(config.functions.is_empty());

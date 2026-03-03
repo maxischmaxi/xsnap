@@ -612,7 +612,7 @@ mod tests {
             base_url: "http://localhost:3000".into(),
             browser: None,
             full_screen: true,
-            test_pattern: "tests/**/*.xsnap.json".into(),
+            test_pattern: "tests/**/*.xsnap.jsonc".into(),
             ignore_patterns: vec![],
             default_sizes: Some(vec![
                 Size {
@@ -669,7 +669,7 @@ mod tests {
             base_url: "http://localhost:3000".into(),
             browser: None,
             full_screen: true,
-            test_pattern: "tests/**/*.xsnap.json".into(),
+            test_pattern: "tests/**/*.xsnap.jsonc".into(),
             ignore_patterns: vec![],
             default_sizes: Some(vec![Size {
                 name: "desktop".into(),
@@ -735,7 +735,7 @@ mod tests {
             base_url: "http://localhost:3000".into(),
             browser: None,
             full_screen: true,
-            test_pattern: "tests/**/*.xsnap.json".into(),
+            test_pattern: "tests/**/*.xsnap.jsonc".into(),
             ignore_patterns: vec![],
             default_sizes: None,
             functions: HashMap::new(),
