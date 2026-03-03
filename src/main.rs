@@ -80,10 +80,10 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
+    let exit_code = match cli.command {
         Commands::Test {
             config,
             no_create,
@@ -93,27 +93,73 @@ async fn main() -> anyhow::Result<()> {
             pipeline,
             parallelism,
         } => {
-            let _ = (config, no_create, no_only, no_skip, filter, pipeline, parallelism);
-            todo!("Implement test command")
+            match xsnap::commands::test::run_test(xsnap::commands::test::TestOptions {
+                config,
+                no_create,
+                no_only,
+                no_skip,
+                filter,
+                pipeline,
+                parallelism,
+            })
+            .await
+            {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    4
+                }
+            }
         }
         Commands::Approve {
             config,
             all,
             filter,
         } => {
-            let _ = (config, all, filter);
-            todo!("Implement approve command")
+            match xsnap::commands::approve::run_approve(
+                xsnap::commands::approve::ApproveOptions {
+                    config,
+                    all,
+                    filter,
+                },
+            ) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    2
+                }
+            }
         }
         Commands::Cleanup { config } => {
-            let _ = config;
-            todo!("Implement cleanup command")
+            match xsnap::commands::cleanup::run_cleanup(
+                xsnap::commands::cleanup::CleanupOptions { config },
+            ) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    2
+                }
+            }
         }
         Commands::Migrate { source, target } => {
-            let _ = (source, target);
-            todo!("Implement migrate command")
+            match xsnap::commands::migrate::run_migrate(
+                xsnap::commands::migrate::MigrateOptions { source, target },
+            ) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    2
+                }
+            }
         }
-        Commands::Init => {
-            todo!("Implement init command")
-        }
-    }
+        Commands::Init => match xsnap::commands::init::run_init() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                4
+            }
+        },
+    };
+
+    std::process::exit(exit_code);
 }
