@@ -5,19 +5,16 @@ RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists
 
 WORKDIR /build
 
-# Dependency caching: copy manifests first, build deps with dummy source
+# Copy source
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src && \
-    echo "pub mod browser;\npub mod commands;\npub mod config;\npub mod diff;\npub mod error;\npub mod runner;\npub mod ui;" > src/lib.rs && \
-    echo "fn main() {}" > src/main.rs && \
-    mkdir -p src/browser src/commands src/config src/diff src/error src/runner src/ui && \
-    for dir in browser commands config diff error runner ui; do touch src/$dir/mod.rs; done && \
-    cargo build --release && \
-    rm -rf src
-
-# Copy real source and rebuild
 COPY src/ src/
-RUN touch src/main.rs src/lib.rs && cargo build --release
+
+# Build with BuildKit cache mounts for cargo registry and target dir
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release && \
+    cp target/release/xsnap /usr/local/bin/xsnap
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
@@ -60,6 +57,6 @@ RUN set -eux; \
     rm -rf /tmp/chrome /tmp/chrome.zip; \
     chmod +x "$CACHE_DIR/chrome"
 
-COPY --from=builder /build/target/release/xsnap /usr/local/bin/xsnap
+COPY --from=builder /usr/local/bin/xsnap /usr/local/bin/xsnap
 
 ENTRYPOINT ["xsnap"]
