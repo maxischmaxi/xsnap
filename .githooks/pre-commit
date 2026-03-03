@@ -1,0 +1,18 @@
+#!/bin/sh
+# Pre-commit hook for xsnap: runs cargo fmt and cargo clippy
+
+set -e
+
+echo "Running cargo fmt check..."
+if ! cargo fmt -- --check 2>/dev/null; then
+    echo "Formatting issues found. Run 'cargo fmt' to fix."
+    exit 1
+fi
+
+echo "Running cargo clippy..."
+if ! cargo clippy -- -D warnings 2>/dev/null; then
+    echo "Clippy warnings found. Fix them before committing."
+    exit 1
+fi
+
+echo "Pre-commit checks passed."
