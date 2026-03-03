@@ -1,0 +1,33 @@
+[package]
+name = "xsnap"
+version = "0.1.0"
+edition = "2024"
+description = "Visual regression testing tool"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+json_comments = "0.2"
+schemars = "1"
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+image = "0.25"
+image-compare = "0.4"
+ratatui = { version = "0.29", features = ["crossterm"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+indicatif = "0.17"
+glob = "0.3"
+dialoguer = "0.11"
+reqwest = { version = "0.12", features = ["stream"] }
+serde_yaml = "0.9"
+thiserror = "2"
+anyhow = "1"
+num_cpus = "1"
+zip = "2"
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
+assert_fs = "1"
