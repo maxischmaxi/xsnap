@@ -4,12 +4,70 @@ Visual regression testing tool for web applications. Takes screenshots of your p
 
 Built in Rust. Uses Chrome for Testing via CDP (Chrome DevTools Protocol).
 
+## Installation
+
+### Auto-detect (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/xsnap/main/install.sh | bash
+```
+
+### Platform-specific
+
+```bash
+# Linux x64
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-x64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+
+# Linux arm64
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-linux-arm64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+
+# macOS Intel
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-x64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+
+# macOS Apple Silicon
+curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-arm64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
+```
+
+### Windows
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-windows-x64.exe" -OutFile "$env:LOCALAPPDATA\xsnap\xsnap.exe"
+```
+
+### Docker
+
+```bash
+# Run directly
+docker run --rm ghcr.io/maxischmaxi/xsnap:latest --version
+
+# Run tests against a local server (host network)
+docker run --rm --network host -v $(pwd):/work -w /work ghcr.io/maxischmaxi/xsnap:latest test --pipeline
+
+# Use as base image
+FROM ghcr.io/maxischmaxi/xsnap:latest
+COPY . /work
+WORKDIR /work
+CMD ["test", "--pipeline"]
+
+# Copy binary from image
+COPY --from=ghcr.io/maxischmaxi/xsnap:latest /usr/local/bin/xsnap /usr/local/bin/xsnap
+```
+
+### Build from source
+
+```bash
+# Install via cargo
+cargo install --git https://github.com/maxischmaxi/xsnap.git
+
+# Or clone and build
+git clone https://github.com/maxischmaxi/xsnap.git
+cd xsnap
+cargo build --release
+```
+
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
-
 # Initialize a project
 xsnap init
 
