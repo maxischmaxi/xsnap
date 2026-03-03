@@ -9,7 +9,11 @@ Built in Rust. Uses Chrome for Testing via CDP (Chrome DevTools Protocol).
 ### Auto-detect (Linux/macOS)
 
 ```bash
+# Latest version
 curl -fsSL https://raw.githubusercontent.com/maxischmaxi/xsnap/main/install.sh | bash
+
+# Specific version
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/xsnap/main/install.sh | bash -s -- 0.1.2
 ```
 
 ### Platform-specific
@@ -26,12 +30,6 @@ curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-d
 
 # macOS Apple Silicon
 curl -fsSL https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-darwin-arm64 -o /usr/local/bin/xsnap && chmod +x /usr/local/bin/xsnap
-```
-
-### Windows
-
-```powershell
-Invoke-WebRequest -Uri "https://github.com/maxischmaxi/xsnap/releases/latest/download/xsnap-windows-x64.exe" -OutFile "$env:LOCALAPPDATA\xsnap\xsnap.exe"
 ```
 
 ### Docker
