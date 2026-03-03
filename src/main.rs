@@ -13,70 +13,70 @@ struct Cli {
 enum Commands {
     /// Run visual regression tests
     Test {
+        /// Path to config file
+        #[arg(long, default_value = "xsnap.config.jsonc")]
+        config: String,
+
+        /// Disable automatic snapshot creation for new tests
+        #[arg(long)]
+        no_create: bool,
+
+        /// Disable .only behavior
+        #[arg(long)]
+        no_only: bool,
+
+        /// Disable .skip behavior
+        #[arg(long)]
+        no_skip: bool,
+
         /// Filter tests by name pattern
-        #[arg(short, long)]
+        #[arg(long)]
         filter: Option<String>,
 
-        /// Update baseline snapshots instead of comparing
-        #[arg(short, long)]
-        update: bool,
-
-        /// Path to config file
-        #[arg(short, long)]
-        config: Option<String>,
+        /// Run tests in pipeline mode
+        #[arg(long)]
+        pipeline: bool,
 
         /// Number of parallel browser instances
-        #[arg(short, long)]
+        #[arg(long)]
         parallelism: Option<usize>,
-
-        /// Only run tests matching these tags
-        #[arg(long)]
-        tag: Vec<String>,
-
-        /// Fail fast on first mismatch
-        #[arg(long)]
-        fail_fast: bool,
     },
 
     /// Approve failing snapshots as new baselines
     Approve {
+        /// Path to config file
+        #[arg(long, default_value = "xsnap.config.jsonc")]
+        config: String,
+
         /// Approve all failing snapshots
-        #[arg(short, long)]
+        #[arg(long)]
         all: bool,
 
-        /// Approve specific test by name
-        #[arg(short, long)]
-        test: Option<String>,
-
-        /// Interactive approval mode
-        #[arg(short, long)]
-        interactive: bool,
+        /// Filter tests by name pattern
+        #[arg(long)]
+        filter: Option<String>,
     },
 
     /// Clean up orphaned snapshots
     Cleanup {
-        /// Dry run - show what would be deleted
-        #[arg(short, long)]
-        dry_run: bool,
+        /// Path to config file
+        #[arg(long, default_value = "xsnap.config.jsonc")]
+        config: String,
     },
 
-    /// Migrate snapshots after test changes
+    /// Migrate snapshots between directories
     Migrate {
-        /// Old test name
-        #[arg(long)]
-        from: String,
+        /// Source directory
+        #[arg(long, default_value = ".")]
+        source: String,
 
-        /// New test name
-        #[arg(long)]
-        to: String,
+        /// Target directory
+        #[arg(long, default_value = ".")]
+        target: String,
     },
 
     /// Initialize a new xsnap configuration
-    Init {
-        /// Force overwrite existing config
-        #[arg(short, long)]
-        force: bool,
-    },
+    Init,
 }
 
 #[tokio::main]
@@ -85,34 +85,34 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Test {
-            filter,
-            update,
             config,
+            no_create,
+            no_only,
+            no_skip,
+            filter,
+            pipeline,
             parallelism,
-            tag,
-            fail_fast,
         } => {
-            let _ = (filter, update, config, parallelism, tag, fail_fast);
+            let _ = (config, no_create, no_only, no_skip, filter, pipeline, parallelism);
             todo!("Implement test command")
         }
         Commands::Approve {
+            config,
             all,
-            test,
-            interactive,
+            filter,
         } => {
-            let _ = (all, test, interactive);
+            let _ = (config, all, filter);
             todo!("Implement approve command")
         }
-        Commands::Cleanup { dry_run } => {
-            let _ = dry_run;
+        Commands::Cleanup { config } => {
+            let _ = config;
             todo!("Implement cleanup command")
         }
-        Commands::Migrate { from, to } => {
-            let _ = (from, to);
+        Commands::Migrate { source, target } => {
+            let _ = (source, target);
             todo!("Implement migrate command")
         }
-        Commands::Init { force } => {
-            let _ = force;
+        Commands::Init => {
             todo!("Implement init command")
         }
     }

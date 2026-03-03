@@ -36,15 +36,15 @@ pub enum XsnapError {
 impl XsnapError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            XsnapError::ConfigNotFound { .. } => 1,
-            XsnapError::ConfigInvalid { .. } => 1,
-            XsnapError::DuplicateTestName { .. } => 1,
-            XsnapError::UndefinedFunction { .. } => 1,
-            XsnapError::BrowserDownloadFailed { .. } => 2,
-            XsnapError::BrowserLaunchFailed { .. } => 2,
-            XsnapError::CdpError { .. } => 2,
-            XsnapError::NavigationFailed { .. } => 3,
-            XsnapError::ScreenshotFailed { .. } => 3,
+            XsnapError::ConfigNotFound { .. } => 2,
+            XsnapError::ConfigInvalid { .. } => 2,
+            XsnapError::DuplicateTestName { .. } => 2,
+            XsnapError::UndefinedFunction { .. } => 2,
+            XsnapError::BrowserDownloadFailed { .. } => 3,
+            XsnapError::BrowserLaunchFailed { .. } => 3,
+            XsnapError::CdpError { .. } => 4,
+            XsnapError::NavigationFailed { .. } => 4,
+            XsnapError::ScreenshotFailed { .. } => 4,
             XsnapError::DiffFailed { .. } => 4,
         }
     }
