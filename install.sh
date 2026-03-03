@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO="maxischmaxi/xsnap"
 INSTALL_DIR="${XSNAP_INSTALL_DIR:-/usr/local/bin}"
+VERSION="${1:-latest}"
 
 # Detect OS
 case "$(uname -s)" in
@@ -26,9 +27,16 @@ case "$(uname -m)" in
 esac
 
 BINARY="xsnap-${OS}-${ARCH}"
-URL="https://github.com/${REPO}/releases/latest/download/${BINARY}"
 
-echo "Downloading xsnap for ${OS}/${ARCH}..."
+if [ "$VERSION" = "latest" ]; then
+    URL="https://github.com/${REPO}/releases/latest/download/${BINARY}"
+else
+    # Strip leading 'v' if present, then add it back
+    VERSION="${VERSION#v}"
+    URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BINARY}"
+fi
+
+echo "Downloading xsnap ${VERSION} for ${OS}/${ARCH}..."
 curl -fsSL "$URL" -o /tmp/xsnap
 
 echo "Installing to ${INSTALL_DIR}/xsnap..."
