@@ -5,7 +5,7 @@ pub enum XsnapError {
     #[error("Config not found: {path}")]
     ConfigNotFound { path: String },
 
-    #[error("Config invalid: {message}")]
+    #[error("Invalid config: {message}")]
     ConfigInvalid { message: String },
 
     #[error("Duplicate test name: {name}")]
