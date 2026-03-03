@@ -105,36 +105,44 @@ fn test_deserialize_full_global_config() {
 }
 
 #[test]
-fn test_deserialize_test_config() {
-    let data = json!([
-        {
-            "name": "dashboard",
-            "url": "/dashboard",
-            "threshold": 10,
-            "retry": 2,
-            "only": true,
-            "skip": false,
-            "expectedResponseCode": 200,
-            "sizes": [
-                { "name": "tablet", "width": 768, "height": 1024 }
-            ],
-            "actions": [
-                { "action": "wait", "timeout": 1000 },
-                { "action": "click", "selector": ".menu" }
-            ],
-            "ignore": [
-                { "x1": 0, "y1": 0, "x2": 100, "y2": 50 },
-                { "selector": ".dynamic-ad" }
-            ],
-            "httpHeaders": { "X-Custom": "value" }
-        },
-        {
-            "name": "about",
-            "url": "/about"
-        }
-    ]);
+fn test_deserialize_test_file() {
+    let data = json!({
+        "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+        "tests": [
+            {
+                "name": "dashboard",
+                "url": "/dashboard",
+                "threshold": 10,
+                "retry": 2,
+                "only": true,
+                "skip": false,
+                "expectedResponseCode": 200,
+                "sizes": [
+                    { "name": "tablet", "width": 768, "height": 1024 }
+                ],
+                "actions": [
+                    { "action": "wait", "timeout": 1000 },
+                    { "action": "click", "selector": ".menu" }
+                ],
+                "ignore": [
+                    { "x1": 0, "y1": 0, "x2": 100, "y2": 50 },
+                    { "selector": ".dynamic-ad" }
+                ],
+                "httpHeaders": { "X-Custom": "value" }
+            },
+            {
+                "name": "about",
+                "url": "/about"
+            }
+        ]
+    });
 
-    let tests: Vec<TestConfig> = serde_json::from_value(data).unwrap();
+    let test_file: TestFile = serde_json::from_value(data).unwrap();
+    assert_eq!(
+        test_file.schema.as_deref(),
+        Some("https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json")
+    );
+    let tests = &test_file.tests;
 
     assert_eq!(tests.len(), 2);
 

@@ -95,46 +95,49 @@ JSONC (JSON with comments) is supported. The `$schema` field enables editor auto
 
 ### Test Files (`*.xsnap.json`)
 
-Test files are JSON arrays of test configurations, discovered via `testPattern`.
+Test files are JSON objects with a `tests` array, discovered via `testPattern`. The `$schema` field enables editor autocompletion and validation.
 
 ```json
-[
-  {
-    "name": "homepage",
-    "url": "/",
-    "actions": [
-      { "action": "function", "name": "acceptCookies" },
-      { "action": "wait", "timeout": 1000 }
-    ]
-  },
-  {
-    "name": "login",
-    "url": "/login",
-    "only": false,
-    "skip": false,
-    "threshold": 10,
-    "retry": 3,
-    "sizes": [
-      { "name": "mobile", "width": 375, "height": 667 }
-    ],
-    "browser": {
-      "args": ["--force-dark-mode"]
+{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+  "tests": [
+    {
+      "name": "homepage",
+      "url": "/",
+      "actions": [
+        { "action": "function", "name": "acceptCookies" },
+        { "action": "wait", "timeout": 1000 }
+      ]
     },
-    "httpHeaders": {
-      "X-Test": "value"
-    },
-    "actions": [
-      { "action": "type", "selector": "#email", "text": "test@example.com" },
-      { "action": "click", "selector": "#submit" },
-      { "action": "wait", "timeout": 2000 }
-    ],
-    "ignore": [
-      { "selector": ".dynamic-timestamp" },
-      { "selectorAll": ".ad-banner" },
-      { "x1": 0, "y1": 0, "x2": 200, "y2": 50 }
-    ]
-  }
-]
+    {
+      "name": "login",
+      "url": "/login",
+      "only": false,
+      "skip": false,
+      "threshold": 10,
+      "retry": 3,
+      "sizes": [
+        { "name": "mobile", "width": 375, "height": 667 }
+      ],
+      "browser": {
+        "args": ["--force-dark-mode"]
+      },
+      "httpHeaders": {
+        "X-Test": "value"
+      },
+      "actions": [
+        { "action": "type", "selector": "#email", "text": "test@example.com" },
+        { "action": "click", "selector": "#submit" },
+        { "action": "wait", "timeout": 2000 }
+      ],
+      "ignore": [
+        { "selector": ".dynamic-timestamp" },
+        { "selectorAll": ".ad-banner" },
+        { "x1": 0, "y1": 0, "x2": 200, "y2": 50 }
+      ]
+    }
+  ]
+}
 ```
 
 ### Test Config Fields

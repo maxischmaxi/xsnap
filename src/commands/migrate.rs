@@ -90,7 +90,7 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
                     std::fs::create_dir_all(parent)?;
                 }
 
-                migrate_yaml_file(test_file, &target_path)?;
+                migrate_yaml_test_file(test_file, &target_path)?;
                 println!("  Migrated: {}", target_path.display());
                 migrated_count += 1;
             } else {
@@ -134,6 +134,28 @@ fn migrate_yaml_file(source: &Path, target: &Path) -> anyhow::Result<()> {
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)?;
     let json_value = yaml_to_json(&yaml_value);
     let json_string = serde_json::to_string_pretty(&json_value)?;
+    std::fs::write(target, json_string)?;
+    Ok(())
+}
+
+/// Reads a YAML test file, converts it to the xsnap test JSON format.
+///
+/// If the resulting JSON is an array, it is wrapped in a `{ "$schema": "...", "tests": [...] }` object.
+fn migrate_yaml_test_file(source: &Path, target: &Path) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(source)?;
+    let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)?;
+    let json_value = yaml_to_json(&yaml_value);
+
+    let wrapped = if json_value.is_array() {
+        serde_json::json!({
+            "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+            "tests": json_value
+        })
+    } else {
+        json_value
+    };
+
+    let json_string = serde_json::to_string_pretty(&wrapped)?;
     std::fs::write(target, json_string)?;
     Ok(())
 }

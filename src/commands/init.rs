@@ -21,15 +21,18 @@ const DEFAULT_CONFIG: &str = r#"{
 }
 "#;
 
-const EXAMPLE_TEST: &str = r#"[
-  {
-    "name": "example",
-    "url": "/",
-    "actions": [
-      { "action": "wait", "timeout": 1000 }
-    ]
-  }
-]
+const EXAMPLE_TEST: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+  "tests": [
+    {
+      "name": "example",
+      "url": "/",
+      "actions": [
+        { "action": "wait", "timeout": 1000 }
+      ]
+    }
+  ]
+}
 "#;
 
 pub fn run_init() -> anyhow::Result<()> {

@@ -5,17 +5,19 @@ use xsnap::config::test::{discover_test_files, load_test_file};
 
 #[test]
 fn test_load_test_file() {
-    let json = r#"[
-        {
-            "name": "home page",
-            "url": "/",
-            "threshold": 5
-        },
-        {
-            "name": "about page",
-            "url": "/about"
-        }
-    ]"#;
+    let json = r#"{
+        "tests": [
+            {
+                "name": "home page",
+                "url": "/",
+                "threshold": 5
+            },
+            {
+                "name": "about page",
+                "url": "/about"
+            }
+        ]
+    }"#;
 
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(json.as_bytes()).unwrap();
@@ -40,8 +42,8 @@ fn test_discover_test_files() {
     fs::create_dir_all(&nested_dir).unwrap();
 
     // Create matching files
-    fs::write(tests_dir.join("home.xsnap.json"), "[]").unwrap();
-    fs::write(nested_dir.join("dashboard.xsnap.json"), "[]").unwrap();
+    fs::write(tests_dir.join("home.xsnap.json"), r#"{"tests":[]}"#).unwrap();
+    fs::write(nested_dir.join("dashboard.xsnap.json"), r#"{"tests":[]}"#).unwrap();
 
     // Create non-matching files
     fs::write(tests_dir.join("readme.md"), "# readme").unwrap();

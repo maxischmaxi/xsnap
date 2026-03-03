@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::types::TestConfig;
+use crate::config::types::{TestConfig, TestFile};
 use crate::error::XsnapError;
 
 pub fn load_test_file(path: &Path) -> Result<Vec<TestConfig>, XsnapError> {
@@ -8,12 +8,12 @@ pub fn load_test_file(path: &Path) -> Result<Vec<TestConfig>, XsnapError> {
         path: path.display().to_string(),
     })?;
 
-    let tests: Vec<TestConfig> =
+    let test_file: TestFile =
         serde_json::from_str(&content).map_err(|e| XsnapError::ConfigInvalid {
             message: format!("{}: {}", path.display(), e),
         })?;
 
-    Ok(tests)
+    Ok(test_file.tests)
 }
 
 pub fn discover_test_files(

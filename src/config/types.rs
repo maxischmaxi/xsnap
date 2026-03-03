@@ -92,6 +92,17 @@ pub struct Color {
 }
 
 // ---------------------------------------------------------------------------
+// TestFile (wrapper for test files with $schema support)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TestFile {
+    #[serde(rename = "$schema", default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+    pub tests: Vec<TestConfig>,
+}
+
+// ---------------------------------------------------------------------------
 // TestConfig
 // ---------------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-use xsnap::config::schema::generate_schema;
+use xsnap::config::schema::{generate_schema, generate_test_schema};
 
 #[test]
 fn test_generate_schema_is_valid_json() {
@@ -54,5 +54,33 @@ fn test_schema_has_required_fields() {
     assert!(
         props_obj.contains_key("threshold"),
         "Should have threshold property"
+    );
+}
+
+#[test]
+fn test_generate_test_schema_is_valid_json() {
+    let schema_str = generate_test_schema();
+    let parsed: serde_json::Value = serde_json::from_str(&schema_str).unwrap();
+
+    assert!(parsed.is_object(), "Test schema should be a JSON object");
+
+    assert!(
+        parsed.get("$schema").is_some(),
+        "Test schema should have a $schema field"
+    );
+
+    let properties = parsed
+        .get("properties")
+        .expect("Test schema should have properties");
+
+    let props_obj = properties.as_object().unwrap();
+
+    assert!(
+        props_obj.contains_key("$schema"),
+        "Should have $schema property"
+    );
+    assert!(
+        props_obj.contains_key("tests"),
+        "Should have tests property"
     );
 }
