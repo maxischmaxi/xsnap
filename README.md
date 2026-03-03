@@ -308,20 +308,16 @@ xsnap cleanup [OPTIONS]
 
 ### `xsnap migrate`
 
-Converts OSnap YAML configs to xsnap JSON format. Interactive per-file confirmation.
+Migriert ein bestehendes OSnap-Projekt nach xsnap. Konvertiert Config- und Test-Dateien, löst String-basierte Sizes auf und benennt Snapshot-Dateien um. Siehe **[MIGRATION.md](MIGRATION.md)** für die vollständige Anleitung.
 
 ```bash
-xsnap migrate [OPTIONS]
+xsnap migrate --source . --target .
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--source <dir>` | Source directory with OSnap files (default: `.`) |
 | `--target <dir>` | Target directory for xsnap files (default: `.`) |
-
-Converts:
-- `osnap.config.yaml` -> `xsnap.config.jsonc`
-- `*.osnap.yaml` / `*.osnap.yml` -> `*.xsnap.json`
 
 ### `xsnap init`
 

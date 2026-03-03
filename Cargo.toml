@@ -44,6 +44,9 @@ reqwest = { version = "0.12", default-features = false, features = ["stream", "j
 # YAML (migration from OSnap)
 serde_yaml = "0.9"
 
+# Regex (OSnap filename parsing)
+regex = "1"
+
 # Errors
 thiserror = "2"
 anyhow = "1"

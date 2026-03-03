@@ -3754,6 +3754,7 @@ dependencies = [
  "json_comments",
  "num_cpus",
  "ratatui",
+ "regex",
  "reqwest",
  "schemars",
  "serde",
