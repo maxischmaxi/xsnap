@@ -1,15 +1,18 @@
 use std::path::{Path, PathBuf};
 
+use json_comments::StripComments;
+
 use crate::config::types::{TestConfig, TestFile};
 use crate::error::XsnapError;
 
 pub fn load_test_file(path: &Path) -> Result<Vec<TestConfig>, XsnapError> {
-    let content = std::fs::read_to_string(path).map_err(|_| XsnapError::ConfigNotFound {
+    let content = std::fs::read(path).map_err(|_| XsnapError::ConfigNotFound {
         path: path.display().to_string(),
     })?;
 
+    let stripped = StripComments::new(content.as_slice());
     let test_file: TestFile =
-        serde_json::from_str(&content).map_err(|e| XsnapError::ConfigInvalid {
+        serde_json::from_reader(stripped).map_err(|e| XsnapError::ConfigInvalid {
             message: format!("{}: {}", path.display(), e),
         })?;
 

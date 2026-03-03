@@ -1,6 +1,15 @@
 use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
 
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+};
 use regex::Regex;
 
 /// Options for the `xsnap migrate` command.
@@ -29,16 +38,366 @@ struct SizeMaps {
 struct OsnapConfig {
     size_maps: SizeMaps,
     snapshot_directory: Option<String>,
-    /// The full config as JSON (for writing the migrated config file).
-    json_value: serde_json::Value,
 }
+
+// ---------------------------------------------------------------------------
+// Migration item types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MigrateKind {
+    Config,
+    TestFile,
+    Snapshot,
+}
+
+struct MigrateItem {
+    kind: MigrateKind,
+    source: PathBuf,
+    target: PathBuf,
+    label: String,
+    selected: bool,
+}
+
+struct MigrateTuiState {
+    items: Vec<MigrateItem>,
+    table_state: TableState,
+    confirmed: bool,
+    cancelled: bool,
+}
+
+impl MigrateTuiState {
+    fn new(items: Vec<MigrateItem>) -> Self {
+        let mut table_state = TableState::default();
+        if !items.is_empty() {
+            table_state.select(Some(0));
+        }
+        Self {
+            items,
+            table_state,
+            confirmed: false,
+            cancelled: false,
+        }
+    }
+
+    fn selected_count(&self) -> usize {
+        self.items.iter().filter(|i| i.selected).count()
+    }
+
+    fn scroll_up(&mut self) {
+        let selected = self.table_state.selected().unwrap_or(0);
+        if selected > 0 {
+            self.table_state.select(Some(selected - 1));
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        if self.items.is_empty() {
+            return;
+        }
+        let max = self.items.len() - 1;
+        let selected = self.table_state.selected().unwrap_or(0);
+        if selected < max {
+            self.table_state.select(Some(selected + 1));
+        }
+    }
+
+    fn toggle_current(&mut self) {
+        if let Some(idx) = self.table_state.selected() {
+            self.items[idx].selected = !self.items[idx].selected;
+        }
+    }
+
+    fn select_all(&mut self) {
+        for item in &mut self.items {
+            item.selected = true;
+        }
+    }
+
+    fn deselect_all(&mut self) {
+        for item in &mut self.items {
+            item.selected = false;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Collect
+// ---------------------------------------------------------------------------
+
+fn collect_migrate_items(
+    source_dir: &Path,
+    target_dir: &Path,
+    osnap_config: Option<&OsnapConfig>,
+) -> anyhow::Result<Vec<MigrateItem>> {
+    let mut items = Vec::new();
+
+    // Config item
+    let config_source = source_dir.join("osnap.config.yaml");
+    if config_source.exists() {
+        let config_target = target_dir.join("xsnap.config.jsonc");
+        let label = format!(
+            "{}  →  {}",
+            short_path(&config_source, source_dir),
+            short_path(&config_target, target_dir),
+        );
+        items.push(MigrateItem {
+            kind: MigrateKind::Config,
+            source: config_source,
+            target: config_target,
+            label,
+            selected: true,
+        });
+    }
+
+    // Test file items
+    let test_files = find_osnap_test_files(source_dir)?;
+    for test_file in &test_files {
+        let relative = test_file.strip_prefix(source_dir).unwrap_or(test_file);
+        let new_name = relative
+            .to_string_lossy()
+            .replace(".osnap.yaml", ".xsnap.jsonc")
+            .replace(".osnap.yml", ".xsnap.jsonc");
+        let target_path = target_dir.join(&new_name);
+
+        let label = format!(
+            "{}  →  {}",
+            short_path(test_file, source_dir),
+            short_path(&target_path, target_dir),
+        );
+        items.push(MigrateItem {
+            kind: MigrateKind::TestFile,
+            source: test_file.clone(),
+            target: target_path,
+            label,
+            selected: true,
+        });
+    }
+
+    // Snapshot items
+    if let Some(config) = osnap_config
+        && let Some(ref snapshot_dir_rel) = config.snapshot_directory
+    {
+        let snapshot_dir = source_dir.join(snapshot_dir_rel);
+        let base_images_dir = snapshot_dir.join("__base_images__");
+
+        if base_images_dir.exists() {
+            let pattern = base_images_dir.join("*.png").display().to_string();
+            let files: Vec<PathBuf> = glob::glob(&pattern)?.flatten().collect();
+
+            for file in &files {
+                let filename = match file.file_name().and_then(|f| f.to_str()) {
+                    Some(f) => f,
+                    None => continue,
+                };
+
+                let (test_name, width, height) = match parse_osnap_filename(filename) {
+                    Some(parsed) => parsed,
+                    None => continue,
+                };
+
+                let size_name = match config.size_maps.by_dimensions.get(&(width, height)) {
+                    Some(name) => name,
+                    None => continue,
+                };
+
+                let new_filename = format!("{}-{}-{}x{}.png", test_name, size_name, width, height);
+                let new_path = base_images_dir.join(&new_filename);
+
+                if new_path.exists() {
+                    continue;
+                }
+
+                let label = format!("{}  →  {}", filename, new_filename);
+                items.push(MigrateItem {
+                    kind: MigrateKind::Snapshot,
+                    source: file.clone(),
+                    target: new_path,
+                    label,
+                    selected: true,
+                });
+            }
+        }
+    }
+
+    Ok(items)
+}
+
+fn short_path(path: &Path, base: &Path) -> String {
+    path.strip_prefix(base)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// TUI
+// ---------------------------------------------------------------------------
+
+fn render_migrate_tui(frame: &mut Frame, state: &mut MigrateTuiState) {
+    let area = frame.area();
+
+    let chunks = Layout::vertical([Constraint::Min(5), Constraint::Length(3)]).split(area);
+
+    // Items table
+    let title = format!(
+        " Migration ({}/{} selected) ",
+        state.selected_count(),
+        state.items.len()
+    );
+
+    let rows: Vec<Row> = state
+        .items
+        .iter()
+        .map(|item| {
+            let checkbox = if item.selected { "[x]" } else { "[ ]" };
+            let (kind_tag, kind_style) = match item.kind {
+                MigrateKind::Config => ("CONFIG", Style::default().fg(Color::Magenta)),
+                MigrateKind::TestFile => ("TEST  ", Style::default().fg(Color::Cyan)),
+                MigrateKind::Snapshot => ("SNAP  ", Style::default().fg(Color::Yellow)),
+            };
+
+            Row::new(vec![
+                Cell::from(checkbox),
+                Cell::from(kind_tag).style(kind_style),
+                Cell::from(item.label.as_str()),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(3),
+            Constraint::Length(6),
+            Constraint::Percentage(100),
+        ],
+    )
+    .block(Block::default().borders(Borders::ALL).title(title))
+    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    frame.render_stateful_widget(table, chunks[0], &mut state.table_state);
+
+    // Controls bar
+    let controls = Line::from(vec![
+        Span::styled(" \u{2191}\u{2193}", Style::default().fg(Color::Green)),
+        Span::raw("/"),
+        Span::styled("jk", Style::default().fg(Color::Green)),
+        Span::raw(" Navigate  "),
+        Span::styled("Space", Style::default().fg(Color::Green)),
+        Span::raw(" Toggle  "),
+        Span::styled("a", Style::default().fg(Color::Green)),
+        Span::raw(" All  "),
+        Span::styled("n", Style::default().fg(Color::Green)),
+        Span::raw(" None  "),
+        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::raw(" Migrate  "),
+        Span::styled("q", Style::default().fg(Color::Green)),
+        Span::raw(" Cancel"),
+    ]);
+
+    let controls_bar =
+        Paragraph::new(controls).block(Block::default().borders(Borders::ALL).title(" Controls "));
+
+    frame.render_widget(controls_bar, chunks[1]);
+}
+
+fn run_migrate_tui(items: Vec<MigrateItem>) -> io::Result<MigrateTuiState> {
+    let mut terminal = ratatui::init();
+    let result = run_migrate_tui_inner(&mut terminal, items);
+    ratatui::restore();
+    result
+}
+
+fn run_migrate_tui_inner(
+    terminal: &mut ratatui::DefaultTerminal,
+    items: Vec<MigrateItem>,
+) -> io::Result<MigrateTuiState> {
+    let mut state = MigrateTuiState::new(items);
+
+    loop {
+        terminal.draw(|frame| render_migrate_tui(frame, &mut state))?;
+
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    state.cancelled = true;
+                    return Ok(state);
+                }
+                KeyCode::Enter => {
+                    state.confirmed = true;
+                    return Ok(state);
+                }
+                KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
+                KeyCode::Down | KeyCode::Char('j') => state.scroll_down(),
+                KeyCode::Char(' ') => state.toggle_current(),
+                KeyCode::Char('a') => state.select_all(),
+                KeyCode::Char('n') => state.deselect_all(),
+                _ => {}
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Execute
+// ---------------------------------------------------------------------------
+
+fn execute_migrate_items(
+    items: &[MigrateItem],
+    size_map: &HashMap<String, SizeInfo>,
+) -> anyhow::Result<(usize, usize)> {
+    let mut migrated = 0;
+    let mut skipped = 0;
+
+    for item in items {
+        if !item.selected {
+            skipped += 1;
+            continue;
+        }
+
+        match item.kind {
+            MigrateKind::Config => {
+                let content = std::fs::read_to_string(&item.source)?;
+                let yaml_value: serde_yaml::Value = serde_yaml::from_str(&content)?;
+                let mut json_value = yaml_to_json(&yaml_value);
+                migrate_config_json(&mut json_value);
+                let json_string = serde_json::to_string_pretty(&json_value)?;
+                std::fs::write(&item.target, json_string)?;
+                println!("  Migrated: {}", item.target.display());
+            }
+            MigrateKind::TestFile => {
+                if let Some(parent) = item.target.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                migrate_yaml_test_file(&item.source, &item.target, size_map)?;
+                println!("  Migrated: {}", item.target.display());
+            }
+            MigrateKind::Snapshot => {
+                std::fs::rename(&item.source, &item.target)?;
+                println!("  Renamed:  {}", item.target.display());
+            }
+        }
+
+        migrated += 1;
+    }
+
+    Ok((migrated, skipped))
+}
+
+// ---------------------------------------------------------------------------
+// run_migrate (entry point)
+// ---------------------------------------------------------------------------
 
 /// Run the migrate command.
 ///
 /// 1. Parses `osnap.config.yaml` to build size maps.
-/// 2. Converts config to `xsnap.config.jsonc`.
-/// 3. Converts `*.osnap.yaml` test files to `*.xsnap.json` with resolved sizes.
-/// 4. Renames snapshot files from OSnap naming to xsnap naming.
+/// 2. Collects all migration items (config, tests, snapshots).
+/// 3. Presents a TUI for the user to select items.
+/// 4. Executes the selected migrations.
 pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
     let source_dir = Path::new(&opts.source);
     let target_dir = Path::new(&opts.target);
@@ -49,10 +408,7 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
 
     std::fs::create_dir_all(target_dir)?;
 
-    let mut migrated_count = 0;
-    let mut skipped_count = 0;
-
-    // 1. Parse OSnap config and build size maps
+    // 1. Parse OSnap config
     let config_source = source_dir.join("osnap.config.yaml");
     let osnap_config = if config_source.exists() {
         Some(parse_osnap_config(&config_source)?)
@@ -61,107 +417,68 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
         None
     };
 
-    // 2. Migrate config file
-    if let Some(ref config) = osnap_config {
-        let config_target = target_dir.join("xsnap.config.jsonc");
+    // 2. Collect all migration items
+    let items = collect_migrate_items(source_dir, target_dir, osnap_config.as_ref())?;
 
-        let prompt = format!(
-            "Migrate {} -> {}?",
-            config_source.display(),
-            config_target.display()
-        );
-        let should_migrate = dialoguer::Confirm::new()
-            .with_prompt(&prompt)
-            .default(true)
-            .interact()
-            .unwrap_or(false);
-
-        if should_migrate {
-            let json_string = serde_json::to_string_pretty(&config.json_value)?;
-            std::fs::write(&config_target, json_string)?;
-            println!("  Migrated: {}", config_target.display());
-            migrated_count += 1;
-        } else {
-            println!("  Skipped: {}", config_source.display());
-            skipped_count += 1;
-        }
+    if items.is_empty() {
+        println!("Nothing to migrate.");
+        return Ok(());
     }
 
-    // 3. Migrate test files with size resolution
+    // 3. TUI selection
+    let state = run_migrate_tui(items)?;
+
+    if state.cancelled {
+        println!("Migration cancelled.");
+        return Ok(());
+    }
+
+    // 4. Execute selected items
     let size_map = osnap_config
         .as_ref()
         .map(|c| &c.size_maps.by_name)
         .cloned()
         .unwrap_or_default();
 
-    let test_files = find_osnap_test_files(source_dir)?;
-
-    if test_files.is_empty() {
-        println!("No *.osnap.yaml test files found.");
-    } else {
-        println!("\nFound {} OSnap test file(s):", test_files.len());
-
-        for test_file in &test_files {
-            let relative = test_file.strip_prefix(source_dir).unwrap_or(test_file);
-
-            let new_name = relative
-                .to_string_lossy()
-                .replace(".osnap.yaml", ".xsnap.json")
-                .replace(".osnap.yml", ".xsnap.json");
-            let target_path = target_dir.join(&new_name);
-
-            let prompt = format!(
-                "Migrate {} -> {}?",
-                test_file.display(),
-                target_path.display()
-            );
-            let should_migrate = dialoguer::Confirm::new()
-                .with_prompt(&prompt)
-                .default(true)
-                .interact()
-                .unwrap_or(false);
-
-            if should_migrate {
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                migrate_yaml_test_file(test_file, &target_path, &size_map)?;
-                println!("  Migrated: {}", target_path.display());
-                migrated_count += 1;
-            } else {
-                println!("  Skipped: {}", test_file.display());
-                skipped_count += 1;
-            }
-        }
-    }
-
-    // 4. Rename snapshot files
-    if let Some(ref config) = osnap_config
-        && let Some(ref snapshot_dir_rel) = config.snapshot_directory
-    {
-        let snapshot_dir = source_dir.join(snapshot_dir_rel);
-        let base_images_dir = snapshot_dir.join("__base_images__");
-
-        if base_images_dir.exists() {
-            let (renamed, rename_skipped) =
-                migrate_snapshot_files(&base_images_dir, &config.size_maps.by_dimensions)?;
-            migrated_count += renamed;
-            skipped_count += rename_skipped;
-        } else {
-            println!(
-                "\nNo __base_images__ directory found at {}",
-                base_images_dir.display()
-            );
-        }
-    }
+    let (migrated, skipped) = execute_migrate_items(&state.items, &size_map)?;
 
     println!(
         "\nMigration complete: {} migrated, {} skipped.",
-        migrated_count, skipped_count
+        migrated, skipped
     );
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers (unchanged)
+// ---------------------------------------------------------------------------
+
+/// Transform a parsed OSnap config JSON for xsnap:
+/// - Add `$schema`
+/// - Rewrite `testPattern` from `.osnap.yaml`/`.osnap.yml` to `.xsnap.jsonc`
+fn migrate_config_json(value: &mut serde_json::Value) {
+    if let Some(obj) = value.as_object_mut() {
+        // Insert $schema at the top (serde_json Map is ordered by insertion for BTreeMap,
+        // but serde_json uses IndexMap-like ordering, so we just insert it).
+        obj.insert(
+            "$schema".to_string(),
+            serde_json::Value::String(
+                "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json"
+                    .to_string(),
+            ),
+        );
+
+        // Rewrite testPattern
+        if let Some(pattern_val) = obj.get_mut("testPattern")
+            && let Some(pattern) = pattern_val.as_str()
+        {
+            let new_pattern = pattern
+                .replace(".osnap.yaml", ".xsnap.jsonc")
+                .replace(".osnap.yml", ".xsnap.jsonc");
+            *pattern_val = serde_json::Value::String(new_pattern);
+        }
+    }
 }
 
 /// Parse the OSnap config file and build size lookup maps.
@@ -202,7 +519,6 @@ fn parse_osnap_config(path: &Path) -> anyhow::Result<OsnapConfig> {
             by_dimensions,
         },
         snapshot_directory,
-        json_value,
     })
 }
 
@@ -233,7 +549,6 @@ fn resolve_sizes(value: &mut serde_json::Value, size_map: &HashMap<String, SizeI
                         resolved.push(item.clone());
                     }
                 } else {
-                    // Already an object, keep as-is
                     resolved.push(item.clone());
                 }
             }
@@ -303,90 +618,6 @@ fn parse_osnap_filename(filename: &str) -> Option<(String, u32, u32)> {
     let height: u32 = caps.get(3)?.as_str().parse().ok()?;
 
     Some((name, width, height))
-}
-
-/// Rename snapshot files from OSnap naming to xsnap naming.
-///
-/// OSnap: `{name}_{width}x{height}.png`
-/// xsnap: `{name}-{size_name}-{width}x{height}.png`
-fn migrate_snapshot_files(
-    base_images_dir: &Path,
-    reverse_size_map: &HashMap<(u32, u32), String>,
-) -> anyhow::Result<(usize, usize)> {
-    let pattern = base_images_dir.join("*.png").display().to_string();
-    let files: Vec<PathBuf> = glob::glob(&pattern)?.flatten().collect();
-
-    if files.is_empty() {
-        println!(
-            "\nNo .png snapshot files found in {}",
-            base_images_dir.display()
-        );
-        return Ok((0, 0));
-    }
-
-    println!(
-        "\nFound {} snapshot file(s) in {}:",
-        files.len(),
-        base_images_dir.display()
-    );
-
-    let mut renamed_count = 0;
-    let mut skipped_count = 0;
-
-    for file in &files {
-        let filename = match file.file_name().and_then(|f| f.to_str()) {
-            Some(f) => f,
-            None => continue,
-        };
-
-        let (test_name, width, height) = match parse_osnap_filename(filename) {
-            Some(parsed) => parsed,
-            None => {
-                println!("  Warning: Could not parse filename '{}'", filename);
-                skipped_count += 1;
-                continue;
-            }
-        };
-
-        let size_name = match reverse_size_map.get(&(width, height)) {
-            Some(name) => name,
-            None => {
-                println!(
-                    "  Warning: No size name for {}x{} in '{}' — skipping",
-                    width, height, filename
-                );
-                skipped_count += 1;
-                continue;
-            }
-        };
-
-        let new_filename = format!("{}-{}-{}x{}.png", test_name, size_name, width, height);
-        let new_path = base_images_dir.join(&new_filename);
-
-        if new_path.exists() {
-            println!("  Skipped (already exists): {}", new_filename);
-            skipped_count += 1;
-            continue;
-        }
-
-        let prompt = format!("Rename {} -> {}?", filename, new_filename);
-        let should_rename = dialoguer::Confirm::new()
-            .with_prompt(&prompt)
-            .default(true)
-            .interact()
-            .unwrap_or(false);
-
-        if should_rename {
-            std::fs::rename(file, &new_path)?;
-            println!("  Renamed: {}", new_filename);
-            renamed_count += 1;
-        } else {
-            println!("  Skipped: {}", filename);
-            skipped_count += 1;
-        }
-    }
-
-    Ok((renamed_count, skipped_count))
 }
 
 /// Recursively converts a `serde_yaml::Value` to a `serde_json::Value`.
@@ -615,7 +846,7 @@ defaultSizes:
     fn test_migrate_yaml_test_file_with_string_sizes() {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("test.osnap.yaml");
-        let target = dir.path().join("test.xsnap.json");
+        let target = dir.path().join("test.xsnap.jsonc");
 
         std::fs::write(
             &source,
@@ -662,5 +893,125 @@ defaultSizes:
         assert_eq!(sizes[0]["width"], 640);
         assert_eq!(sizes[1]["name"], "xlarge");
         assert_eq!(sizes[1]["width"], 1920);
+    }
+
+    #[test]
+    fn test_collect_migrate_items_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        std::fs::write(
+            source.join("osnap.config.yaml"),
+            "baseUrl: http://localhost\n",
+        )
+        .unwrap();
+
+        let config = parse_osnap_config(&source.join("osnap.config.yaml")).unwrap();
+        let items = collect_migrate_items(&source, &target, Some(&config)).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, MigrateKind::Config);
+        assert!(items[0].selected);
+    }
+
+    #[test]
+    fn test_collect_migrate_items_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        let items = collect_migrate_items(&source, &target, None).unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_migrate_tui_state_selection() {
+        let items = vec![
+            MigrateItem {
+                kind: MigrateKind::Config,
+                source: PathBuf::from("a"),
+                target: PathBuf::from("b"),
+                label: "test".into(),
+                selected: true,
+            },
+            MigrateItem {
+                kind: MigrateKind::TestFile,
+                source: PathBuf::from("c"),
+                target: PathBuf::from("d"),
+                label: "test2".into(),
+                selected: true,
+            },
+        ];
+
+        let mut state = MigrateTuiState::new(items);
+        assert_eq!(state.selected_count(), 2);
+
+        state.toggle_current(); // toggles item 0
+        assert_eq!(state.selected_count(), 1);
+        assert!(!state.items[0].selected);
+
+        state.deselect_all();
+        assert_eq!(state.selected_count(), 0);
+
+        state.select_all();
+        assert_eq!(state.selected_count(), 2);
+    }
+
+    #[test]
+    fn test_execute_migrate_items_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("osnap.config.yaml");
+        let target = dir.path().join("xsnap.config.jsonc");
+
+        std::fs::write(
+            &source,
+            "baseUrl: http://localhost\ntestPattern: \"src/**/*.osnap.yaml\"\n",
+        )
+        .unwrap();
+
+        let items = vec![MigrateItem {
+            kind: MigrateKind::Config,
+            source: source.clone(),
+            target: target.clone(),
+            label: "config".into(),
+            selected: true,
+        }];
+
+        let size_map = HashMap::new();
+        let (migrated, skipped) = execute_migrate_items(&items, &size_map).unwrap();
+
+        assert_eq!(migrated, 1);
+        assert_eq!(skipped, 0);
+        assert!(target.exists());
+
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(
+            result["$schema"],
+            "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json"
+        );
+        assert_eq!(result["testPattern"], "src/**/*.xsnap.jsonc");
+    }
+
+    #[test]
+    fn test_execute_migrate_items_skipped() {
+        let items = vec![MigrateItem {
+            kind: MigrateKind::Config,
+            source: PathBuf::from("nonexistent"),
+            target: PathBuf::from("nonexistent"),
+            label: "config".into(),
+            selected: false,
+        }];
+
+        let size_map = HashMap::new();
+        let (migrated, skipped) = execute_migrate_items(&items, &size_map).unwrap();
+
+        assert_eq!(migrated, 0);
+        assert_eq!(skipped, 1);
     }
 }
