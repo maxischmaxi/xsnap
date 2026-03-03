@@ -32,10 +32,6 @@ jobs:
             target: aarch64-apple-darwin
             artifact: xsnap-darwin-arm64
             cross: false
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: xsnap-windows-x64.exe
-            cross: false
 
     steps:
       - uses: actions/checkout@v4
@@ -60,13 +56,8 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Rename binary (Unix)
-        if: runner.os != 'Windows'
+      - name: Rename binary
         run: cp target/${{ matrix.target }}/release/xsnap ${{ matrix.artifact }}
-
-      - name: Rename binary (Windows)
-        if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/xsnap.exe ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:
