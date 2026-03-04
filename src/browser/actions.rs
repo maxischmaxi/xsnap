@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::network::{Headers, SetExtraHttpHeadersParams};
@@ -7,6 +8,8 @@ use chromiumoxide::page::{Page, ScreenshotParams};
 
 use crate::config::types::{Action, Size};
 use crate::error::XsnapError;
+
+const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Sets the viewport (device metrics) for the given page.
 pub async fn set_viewport(page: &Page, size: &Size) -> Result<(), XsnapError> {
@@ -26,10 +29,17 @@ pub async fn set_viewport(page: &Page, size: &Size) -> Result<(), XsnapError> {
     Ok(())
 }
 
-/// Navigates the page to the given URL.
+/// Navigates the page to the given URL with a timeout.
 pub async fn navigate(page: &Page, url: &str) -> Result<(), XsnapError> {
-    page.goto(url)
+    tokio::time::timeout(NAVIGATION_TIMEOUT, page.goto(url))
         .await
+        .map_err(|_| XsnapError::NavigationFailed {
+            url: url.to_string(),
+            message: format!(
+                "Navigation timed out after {}s — is the server running?",
+                NAVIGATION_TIMEOUT.as_secs()
+            ),
+        })?
         .map_err(|e| XsnapError::NavigationFailed {
             url: url.to_string(),
             message: format!("{}", e),

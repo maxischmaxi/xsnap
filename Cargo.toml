@@ -1,6 +1,6 @@
 [package]
 name = "xsnap"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 description = "Visual regression testing tool"
 
@@ -50,6 +50,9 @@ regex = "1"
 # Errors
 thiserror = "2"
 anyhow = "1"
+
+# Process group management (Unix)
+libc = "0.2"
 
 # Misc
 num_cpus = "1"

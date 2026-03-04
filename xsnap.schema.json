@@ -82,9 +82,16 @@
       "type": "string",
       "default": "__snapshots__"
     },
+    "startCommand": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "testPattern": {
       "type": "string",
-      "default": "tests/**/*.xsnap.json"
+      "default": "tests/**/*.xsnap.jsonc"
     },
     "tests": {
       "type": "array",

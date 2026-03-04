@@ -10,7 +10,7 @@ use crate::browser::actions::{
     capture_screenshot, execute_action, navigate, set_extra_headers, set_viewport,
 };
 use crate::browser::pool::BrowserPool;
-use crate::config::types::{Action, GlobalConfig, Size, TestConfig};
+use crate::config::types::{Action, BrowserConfig, GlobalConfig, Size, TestConfig};
 use crate::diff::compare::{CompareResult, compare_images};
 use crate::diff::composite::create_composite;
 use crate::error::XsnapError;
@@ -32,6 +32,7 @@ pub struct TestTask {
     pub snapshot_dir: PathBuf,
     pub actions: Vec<Action>,
     pub http_headers: HashMap<String, String>,
+    pub browser_fingerprint: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,8 @@ pub enum ProgressEvent {
     TestStarted { name: String, size: String },
     TestCompleted(TestResult),
     RunCompleted(RunSummary),
+    ServerWaiting { attempt: u32, max_attempts: u32 },
+    ServerReady,
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +115,13 @@ fn default_sizes() -> Vec<Size> {
 ///
 /// For each test, a `TestTask` is produced for every viewport size. Test-level
 /// settings override global defaults where applicable.
-pub fn build_test_tasks(global: &GlobalConfig, tests: &[TestConfig]) -> Vec<TestTask> {
+///
+/// Returns the list of tasks and a map from browser fingerprint to merged
+/// `BrowserConfig` (used to create one `BrowserPool` per unique fingerprint).
+pub fn build_test_tasks(
+    global: &GlobalConfig,
+    tests: &[TestConfig],
+) -> (Vec<TestTask>, HashMap<String, Option<BrowserConfig>>) {
     let global_sizes = global
         .default_sizes
         .as_ref()
@@ -120,6 +129,7 @@ pub fn build_test_tasks(global: &GlobalConfig, tests: &[TestConfig]) -> Vec<Test
         .unwrap_or_else(default_sizes);
 
     let mut tasks = Vec::new();
+    let mut browser_configs: HashMap<String, Option<BrowserConfig>> = HashMap::new();
 
     for test in tests {
         let sizes = test.sizes.as_ref().unwrap_or(&global_sizes);
@@ -133,6 +143,16 @@ pub fn build_test_tasks(global: &GlobalConfig, tests: &[TestConfig]) -> Vec<Test
                 http_headers.insert(k.clone(), v.clone());
             }
         }
+
+        // Merge browser config and compute fingerprint.
+        let merged_browser = BrowserConfig::merge(global.browser.as_ref(), test.browser.as_ref());
+        let fingerprint = merged_browser
+            .as_ref()
+            .map(|c| c.fingerprint())
+            .unwrap_or_default();
+        browser_configs
+            .entry(fingerprint.clone())
+            .or_insert_with(|| merged_browser.clone());
 
         // Expand function references in actions.
         let raw_actions = test.actions.as_deref().unwrap_or(&[]);
@@ -149,11 +169,12 @@ pub fn build_test_tasks(global: &GlobalConfig, tests: &[TestConfig]) -> Vec<Test
                 snapshot_dir: PathBuf::from(&global.snapshot_directory),
                 actions: actions.clone(),
                 http_headers: http_headers.clone(),
+                browser_fingerprint: fingerprint.clone(),
             });
         }
     }
 
-    tasks
+    (tasks, browser_configs)
 }
 
 // ---------------------------------------------------------------------------
@@ -406,10 +427,10 @@ async fn execute_single_attempt(
 
 /// Run all test tasks with parallel execution and progress reporting.
 ///
-/// Tasks are spawned concurrently (limited by the pool's semaphore). Progress
-/// events are sent through the provided channel.
+/// Tasks are spawned concurrently (limited by the shared semaphore across all
+/// pools). Progress events are sent through the provided channel.
 pub async fn run_all(
-    pool: Arc<BrowserPool>,
+    pools: Arc<HashMap<String, Arc<BrowserPool>>>,
     tasks: Vec<TestTask>,
     no_create: bool,
     progress_tx: Option<mpsc::UnboundedSender<ProgressEvent>>,
@@ -420,7 +441,10 @@ pub async fn run_all(
     let mut handles = Vec::with_capacity(total);
 
     for task in tasks {
-        let pool = Arc::clone(&pool);
+        let pool = pools
+            .get(&task.browser_fingerprint)
+            .expect("pool must exist for fingerprint")
+            .clone();
         let tx = progress_tx.clone();
 
         let handle = tokio::spawn(async move {
@@ -637,6 +661,7 @@ mod tests {
                 b: 255,
             },
             http_headers: HashMap::new(),
+            start_command: None,
             tests: vec![],
         };
 
@@ -655,12 +680,16 @@ mod tests {
             http_headers: None,
         }];
 
-        let tasks = build_test_tasks(&global, &tests);
+        let (tasks, browser_configs) = build_test_tasks(&global, &tests);
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].size.name, "desktop");
         assert_eq!(tasks[1].size.name, "mobile");
         assert_eq!(tasks[0].threshold, 10);
         assert_eq!(tasks[0].retry, 2);
+        // No browser config → default empty fingerprint
+        assert_eq!(tasks[0].browser_fingerprint, "");
+        assert_eq!(browser_configs.len(), 1);
+        assert!(browser_configs.contains_key(""));
     }
 
     #[test]
@@ -691,6 +720,7 @@ mod tests {
                 m.insert("Authorization".into(), "Bearer global".into());
                 m
             },
+            start_command: None,
             tests: vec![],
         };
 
@@ -717,7 +747,7 @@ mod tests {
             }),
         }];
 
-        let tasks = build_test_tasks(&global, &tests);
+        let (tasks, _browser_configs) = build_test_tasks(&global, &tests);
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].size.name, "tablet");
         assert_eq!(tasks[0].threshold, 5);
@@ -749,6 +779,7 @@ mod tests {
                 b: 255,
             },
             http_headers: HashMap::new(),
+            start_command: None,
             tests: vec![],
         };
 
@@ -767,10 +798,187 @@ mod tests {
             http_headers: None,
         }];
 
-        let tasks = build_test_tasks(&global, &tests);
+        let (tasks, _browser_configs) = build_test_tasks(&global, &tests);
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].size.name, "default");
         assert_eq!(tasks[0].size.width, 1280);
         assert_eq!(tasks[0].size.height, 800);
+    }
+
+    #[test]
+    fn test_browser_config_fingerprint_deterministic() {
+        let config = BrowserConfig {
+            version: Some("120".into()),
+            args: vec!["--lang=de".into(), "--disable-gpu".into()],
+            env: {
+                let mut m = HashMap::new();
+                m.insert("LANG".into(), "de_DE".into());
+                m
+            },
+        };
+        // Calling twice gives same result
+        assert_eq!(config.fingerprint(), config.fingerprint());
+        // Args are sorted, so order doesn't matter
+        let config2 = BrowserConfig {
+            version: Some("120".into()),
+            args: vec!["--disable-gpu".into(), "--lang=de".into()],
+            env: {
+                let mut m = HashMap::new();
+                m.insert("LANG".into(), "de_DE".into());
+                m
+            },
+        };
+        assert_eq!(config.fingerprint(), config2.fingerprint());
+    }
+
+    #[test]
+    fn test_browser_config_fingerprint_empty() {
+        let config = BrowserConfig {
+            version: None,
+            args: vec![],
+            env: HashMap::new(),
+        };
+        assert_eq!(config.fingerprint(), "");
+    }
+
+    #[test]
+    fn test_browser_config_merge_both_none() {
+        assert!(BrowserConfig::merge(None, None).is_none());
+    }
+
+    #[test]
+    fn test_browser_config_merge_global_only() {
+        let global = BrowserConfig {
+            version: Some("120".into()),
+            args: vec!["--no-sandbox".into()],
+            env: HashMap::new(),
+        };
+        let merged = BrowserConfig::merge(Some(&global), None).unwrap();
+        assert_eq!(merged.args, vec!["--no-sandbox"]);
+        assert_eq!(merged.version, Some("120".into()));
+    }
+
+    #[test]
+    fn test_browser_config_merge_test_only() {
+        let test = BrowserConfig {
+            version: None,
+            args: vec!["--lang=de".into()],
+            env: HashMap::new(),
+        };
+        let merged = BrowserConfig::merge(None, Some(&test)).unwrap();
+        assert_eq!(merged.args, vec!["--lang=de"]);
+    }
+
+    #[test]
+    fn test_browser_config_merge_combined() {
+        let global = BrowserConfig {
+            version: Some("120".into()),
+            args: vec!["--no-sandbox".into()],
+            env: {
+                let mut m = HashMap::new();
+                m.insert("LANG".into(), "en_US".into());
+                m
+            },
+        };
+        let test = BrowserConfig {
+            version: Some("121".into()),
+            args: vec!["--lang=de".into()],
+            env: {
+                let mut m = HashMap::new();
+                m.insert("LANG".into(), "de_DE".into());
+                m
+            },
+        };
+        let merged = BrowserConfig::merge(Some(&global), Some(&test)).unwrap();
+        assert_eq!(merged.args, vec!["--no-sandbox", "--lang=de"]);
+        assert_eq!(merged.env.get("LANG").unwrap(), "de_DE");
+        assert_eq!(merged.version, Some("121".into()));
+    }
+
+    #[test]
+    fn test_build_test_tasks_different_browser_fingerprints() {
+        let global = GlobalConfig {
+            base_url: "http://localhost:3000".into(),
+            browser: None,
+            full_screen: true,
+            test_pattern: "tests/**/*.xsnap.jsonc".into(),
+            ignore_patterns: vec![],
+            default_sizes: Some(vec![Size {
+                name: "desktop".into(),
+                width: 1920,
+                height: 1080,
+            }]),
+            functions: HashMap::new(),
+            snapshot_directory: "__snapshots__".into(),
+            threshold: 0,
+            retry: 1,
+            parallelism: None,
+            diff_pixel_color: crate::config::types::Color {
+                r: 255,
+                g: 0,
+                b: 255,
+            },
+            http_headers: HashMap::new(),
+            start_command: None,
+            tests: vec![],
+        };
+
+        let tests = vec![
+            TestConfig {
+                name: "default-test".into(),
+                url: "/".into(),
+                threshold: None,
+                retry: None,
+                only: false,
+                skip: false,
+                expected_response_code: None,
+                sizes: None,
+                browser: None,
+                actions: None,
+                ignore: None,
+                http_headers: None,
+            },
+            TestConfig {
+                name: "german-test".into(),
+                url: "/de".into(),
+                threshold: None,
+                retry: None,
+                only: false,
+                skip: false,
+                expected_response_code: None,
+                sizes: None,
+                browser: Some(BrowserConfig {
+                    version: None,
+                    args: vec!["--lang=de".into()],
+                    env: HashMap::new(),
+                }),
+                actions: None,
+                ignore: None,
+                http_headers: None,
+            },
+            TestConfig {
+                name: "also-default".into(),
+                url: "/about".into(),
+                threshold: None,
+                retry: None,
+                only: false,
+                skip: false,
+                expected_response_code: None,
+                sizes: None,
+                browser: None,
+                actions: None,
+                ignore: None,
+                http_headers: None,
+            },
+        ];
+
+        let (tasks, browser_configs) = build_test_tasks(&global, &tests);
+        assert_eq!(tasks.len(), 3);
+        // default-test and also-default share the same fingerprint
+        assert_eq!(tasks[0].browser_fingerprint, tasks[2].browser_fingerprint);
+        // german-test has a different fingerprint
+        assert_ne!(tasks[0].browser_fingerprint, tasks[1].browser_fingerprint);
+        // Two unique fingerprints → two pools needed
+        assert_eq!(browser_configs.len(), 2);
     }
 }

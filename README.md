@@ -277,6 +277,67 @@ xsnap test [OPTIONS]
 - `2` — config error
 - `3` — browser download/launch error
 - `4` — runtime error (CDP, navigation, screenshot, diff)
+- `5` — server not reachable (readiness check failed)
+
+### Dev Server (`startCommand`)
+
+When `startCommand` is configured, xsnap spawns a dev server as a child process before running tests. The server's stdout/stderr is captured and displayed in the TUI log panel on the right side.
+
+Before tests begin, xsnap performs a readiness check: it polls the `baseUrl` up to 10 times (3s interval, 5s HTTP timeout). Any HTTP response (even 404 or 500) counts as "ready" — only connection errors mean the server isn't up yet. If the server doesn't become reachable, all tests are reported as errors.
+
+On shutdown, xsnap sends SIGTERM to the process group, waits 3 seconds, then SIGKILL if still running.
+
+```jsonc
+{
+  "baseUrl": "http://localhost:3000",
+  "startCommand": "npm run dev",
+  // ...
+}
+```
+
+### Parallelism
+
+Controls how many browser tabs run tests concurrently. Configurable via the `parallelism` field in the global config or the `--parallelism` CLI flag. Defaults to the number of CPU cores.
+
+A shared semaphore limits concurrency across all browser instances, so the total number of concurrent tests never exceeds the configured value regardless of how many Chrome instances are active.
+
+```jsonc
+{
+  "parallelism": 4
+}
+```
+
+```bash
+xsnap test --parallelism 2
+```
+
+### Browser Instance Grouping
+
+Tests that share identical browser configuration (args, env, version) are grouped into a single Chrome instance. Tests with different browser settings get separate instances.
+
+Grouping is based on a deterministic fingerprint computed from the merged browser config (global + per-test). Argument order doesn't matter — `["--lang=de", "--disable-gpu"]` produces the same fingerprint as `["--disable-gpu", "--lang=de"]`.
+
+```jsonc
+{
+  "browser": { "args": ["--no-sandbox"] },
+  "tests": []
+}
+```
+
+```json
+// Test file: tests/german.xsnap.json
+{
+  "tests": [
+    {
+      "name": "german-page",
+      "url": "/de",
+      "browser": { "args": ["--lang=de"] }
+    }
+  ]
+}
+```
+
+In this example, `german-page` gets its own Chrome instance with `["--no-sandbox", "--lang=de"]`, while tests without per-test browser config share the default instance with `["--no-sandbox"]`.
 
 ### `xsnap approve`
 

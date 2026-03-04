@@ -42,6 +42,9 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub parallelism: Option<usize>,
 
+    #[serde(default)]
+    pub start_command: Option<String>,
+
     #[serde(default = "default_diff_color")]
     pub diff_pixel_color: Color,
 
@@ -67,6 +70,47 @@ pub struct BrowserConfig {
 
     #[serde(default)]
     pub env: HashMap<String, String>,
+}
+
+impl BrowserConfig {
+    /// Deterministic string fingerprint from args + env.
+    /// Tests with the same fingerprint share a Chrome instance.
+    pub fn fingerprint(&self) -> String {
+        let mut parts: Vec<String> = self.args.clone();
+        parts.sort();
+        let mut env_parts: Vec<String> = self
+            .env
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect();
+        env_parts.sort();
+        parts.extend(env_parts);
+        parts.join("|")
+    }
+
+    /// Merge global config with test-level overrides.
+    /// Test args are appended to global args, test env overrides global env.
+    pub fn merge(
+        global: Option<&BrowserConfig>,
+        test: Option<&BrowserConfig>,
+    ) -> Option<BrowserConfig> {
+        match (global, test) {
+            (None, None) => None,
+            (Some(g), None) => Some(g.clone()),
+            (None, Some(t)) => Some(t.clone()),
+            (Some(g), Some(t)) => {
+                let mut args = g.args.clone();
+                args.extend(t.args.iter().cloned());
+                let mut env = g.env.clone();
+                env.extend(t.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+                Some(BrowserConfig {
+                    version: t.version.clone().or_else(|| g.version.clone()),
+                    args,
+                    env,
+                })
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -20,12 +20,12 @@ impl BrowserPool {
     /// Creates a new `BrowserPool` by launching a Chromium instance.
     ///
     /// - `chrome_path`: Path to the Chrome/Chromium executable.
-    /// - `parallelism`: Maximum number of concurrent pages.
-    /// - `global_browser_config`: Optional extra browser configuration (args, env).
+    /// - `semaphore`: Shared semaphore controlling total parallelism across all pools.
+    /// - `browser_config`: Optional extra browser configuration (args, env).
     pub async fn new(
         chrome_path: &std::path::Path,
-        parallelism: usize,
-        global_browser_config: Option<&XsnapBrowserConfig>,
+        semaphore: Arc<Semaphore>,
+        browser_config: Option<&XsnapBrowserConfig>,
     ) -> Result<Self, XsnapError> {
         let mut builder = BrowserConfig::builder()
             .chrome_executable(chrome_path)
@@ -35,7 +35,7 @@ impl BrowserPool {
             .arg("--no-first-run")
             .arg("--no-default-browser-check");
 
-        if let Some(config) = global_browser_config {
+        if let Some(config) = browser_config {
             for arg in &config.args {
                 builder = builder.arg(arg);
             }
@@ -61,7 +61,7 @@ impl BrowserPool {
 
         Ok(Self {
             browser: Arc::new(browser),
-            semaphore: Arc::new(Semaphore::new(parallelism)),
+            semaphore,
             _handler: handle,
         })
     }

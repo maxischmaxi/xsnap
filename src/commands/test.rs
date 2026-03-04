@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::browser::download::ensure_chromium;
 use crate::browser::pool::BrowserPool;
@@ -9,6 +10,7 @@ use crate::config::global::load_global_config;
 use crate::config::test::{discover_test_files, load_test_file};
 use crate::config::types::TestConfig;
 use crate::config::validate::validate_config;
+use crate::runner::child_process::{ChildProcess, wait_for_server};
 use crate::runner::executor::{ProgressEvent, build_test_tasks, run_all};
 use crate::ui::pipeline::{print_result, print_summary};
 use crate::ui::tui::run_tui;
@@ -65,7 +67,7 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
     }
 
     // 5. Build test tasks (test x size expansion).
-    let tasks = build_test_tasks(&global, &tests);
+    let (tasks, browser_configs) = build_test_tasks(&global, &tests);
     let total_tasks = tasks.len();
 
     if total_tasks == 0 {
@@ -73,7 +75,17 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         return Ok(0);
     }
 
-    // 6. Set up browser.
+    // 6. Start child process if configured (e.g. dev server).
+    let (child_process, log_rx) = if let Some(ref cmd) = global.start_command {
+        let (child, rx) = ChildProcess::spawn(cmd)
+            .map_err(|e| anyhow::anyhow!("Failed to start command '{}': {}", cmd, e))?;
+        (Some(child), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    // 7. Set up browser pool(s).
+    // Determine browser version from global config (used for download).
     let browser_version = global
         .browser
         .as_ref()
@@ -87,20 +99,50 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         .or(global.parallelism)
         .unwrap_or_else(|| num_cpus::get().max(1));
 
-    let pool =
-        Arc::new(BrowserPool::new(&chrome_path, parallelism, global.browser.as_ref()).await?);
+    // Shared semaphore across all pools controls total parallelism.
+    let semaphore = Arc::new(Semaphore::new(parallelism));
 
-    // 7. Run tests.
+    // Create one BrowserPool per unique browser fingerprint.
+    let mut pools = HashMap::new();
+    for (fingerprint, config) in &browser_configs {
+        let pool = BrowserPool::new(&chrome_path, semaphore.clone(), config.as_ref()).await?;
+        pools.insert(fingerprint.clone(), Arc::new(pool));
+    }
+    let pools = Arc::new(pools);
+
+    // 8. Run tests.
+    let has_start_command = global.start_command.is_some();
+    let base_url = global.base_url.clone();
+    let no_create = opts.no_create;
+
     let summary = if opts.pipeline {
         // Pipeline mode: print results as they arrive, no TUI.
         let (tx, mut rx) = mpsc::unbounded_channel::<ProgressEvent>();
 
         let is_github = std::env::var("GITHUB_ACTIONS").is_ok();
 
-        // Spawn the runner.
-        let pool_clone = Arc::clone(&pool);
-        let runner_handle =
-            tokio::spawn(async move { run_all(pool_clone, tasks, opts.no_create, Some(tx)).await });
+        // Spawn the runner with readiness check.
+        let pools_clone = Arc::clone(&pools);
+        let tx_clone = tx.clone();
+        let runner_handle = tokio::spawn(async move {
+            // Phase 1: Server readiness check (when startCommand is set).
+            if has_start_command && !wait_for_server(&base_url, 10, &tx_clone).await {
+                let summary = crate::runner::result::RunSummary {
+                    total: total_tasks,
+                    passed: 0,
+                    failed: 0,
+                    created: 0,
+                    skipped: 0,
+                    errors: total_tasks,
+                    duration: std::time::Duration::ZERO,
+                };
+                let _ = tx_clone.send(ProgressEvent::RunCompleted(summary.clone()));
+                return summary;
+            }
+
+            // Phase 2: Run tests.
+            run_all(pools_clone, tasks, no_create, Some(tx_clone)).await
+        });
 
         // Print results as they arrive.
         while let Some(event) = rx.recv().await {
@@ -114,6 +156,15 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
                 ProgressEvent::RunCompleted(ref summary) => {
                     print_summary(summary);
                 }
+                ProgressEvent::ServerWaiting {
+                    attempt,
+                    max_attempts,
+                } => {
+                    println!("Waiting for server... ({}/{})", attempt, max_attempts);
+                }
+                ProgressEvent::ServerReady => {
+                    println!("Server ready!");
+                }
             }
         }
 
@@ -122,13 +173,31 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         // TUI mode.
         let (tx, rx) = mpsc::unbounded_channel::<ProgressEvent>();
 
-        // Spawn the runner.
-        let pool_clone = Arc::clone(&pool);
-        let runner_handle =
-            tokio::spawn(async move { run_all(pool_clone, tasks, opts.no_create, Some(tx)).await });
+        // Spawn the runner with readiness check.
+        let pools_clone = Arc::clone(&pools);
+        let tx_clone = tx.clone();
+        let runner_handle = tokio::spawn(async move {
+            // Phase 1: Server readiness check (when startCommand is set).
+            if has_start_command && !wait_for_server(&base_url, 10, &tx_clone).await {
+                let summary = crate::runner::result::RunSummary {
+                    total: total_tasks,
+                    passed: 0,
+                    failed: 0,
+                    created: 0,
+                    skipped: 0,
+                    errors: total_tasks,
+                    duration: std::time::Duration::ZERO,
+                };
+                let _ = tx_clone.send(ProgressEvent::RunCompleted(summary.clone()));
+                return summary;
+            }
+
+            // Phase 2: Run tests.
+            run_all(pools_clone, tasks, no_create, Some(tx_clone)).await
+        });
 
         // Run the TUI (blocks until user quits).
-        let tui_result = run_tui(total_tasks, rx).await;
+        let tui_result = run_tui(total_tasks, rx, log_rx, global.start_command.clone()).await;
 
         // Wait for the runner to finish.
         let summary = runner_handle.await?;
@@ -141,12 +210,21 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
         summary
     };
 
-    // 8. Shut down the browser gracefully.
-    if let Ok(pool) = Arc::try_unwrap(pool) {
-        pool.shutdown().await;
+    // 9. Shut down all browser pools gracefully.
+    if let Ok(pools) = Arc::try_unwrap(pools) {
+        for (_, pool) in pools {
+            if let Ok(pool) = Arc::try_unwrap(pool) {
+                pool.shutdown().await;
+            }
+        }
     }
 
-    // 9. Return exit code.
+    // 10. Shut down child process (dev server).
+    if let Some(child) = child_process {
+        child.shutdown().await;
+    }
+
+    // 11. Return exit code.
     if summary.failed > 0 || summary.errors > 0 {
         Ok(1)
     } else {

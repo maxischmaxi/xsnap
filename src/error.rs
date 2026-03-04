@@ -31,6 +31,9 @@ pub enum XsnapError {
 
     #[error("Diff failed: {message}")]
     DiffFailed { message: String },
+
+    #[error("Server not reachable after {attempts} attempts: {url}")]
+    ServerNotReady { url: String, attempts: u32 },
 }
 
 impl XsnapError {
@@ -46,6 +49,7 @@ impl XsnapError {
             XsnapError::NavigationFailed { .. } => 4,
             XsnapError::ScreenshotFailed { .. } => 4,
             XsnapError::DiffFailed { .. } => 4,
+            XsnapError::ServerNotReady { .. } => 5,
         }
     }
 }
