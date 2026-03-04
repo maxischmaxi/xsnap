@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+  "tests": [
+    {
+      "name": "card-default",
+      "url": "/iframe.html?id=components-card--default&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "card-with-action",
+      "url": "/iframe.html?id=components-card--with-action&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    }
+  ]
+}

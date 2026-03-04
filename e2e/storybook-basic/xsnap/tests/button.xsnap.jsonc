@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+  "tests": [
+    {
+      "name": "button-primary",
+      "url": "/iframe.html?id=components-button--primary&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "button-secondary",
+      "url": "/iframe.html?id=components-button--secondary&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "button-outline",
+      "url": "/iframe.html?id=components-button--outline&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "button-disabled",
+      "url": "/iframe.html?id=components-button--disabled&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json",
+  "baseUrl": "http://storybook:8080",
+  "fullScreen": false,
+  "defaultSizes": [{ "name": "desktop", "width": 1280, "height": 720 }],
+  "threshold": 0,
+  "retry": 2,
+  "parallelism": 2
+}

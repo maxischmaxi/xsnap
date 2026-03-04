@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.test.schema.json",
+  "tests": [
+    {
+      "name": "badge-success",
+      "url": "/iframe.html?id=components-badge--success&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "badge-warning",
+      "url": "/iframe.html?id=components-badge--warning&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "badge-error",
+      "url": "/iframe.html?id=components-badge--error&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    },
+    {
+      "name": "badge-info",
+      "url": "/iframe.html?id=components-badge--info&viewMode=story",
+      "actions": [{ "action": "wait", "timeout": 500 }]
+    }
+  ]
+}

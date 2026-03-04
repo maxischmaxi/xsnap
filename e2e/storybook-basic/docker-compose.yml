@@ -1,0 +1,15 @@
+services:
+  storybook:
+    build: ./app
+
+  xsnap:
+    image: ghcr.io/maxischmaxi/xsnap:latest
+    depends_on:
+      storybook:
+        condition: service_healthy
+    working_dir: /work
+    volumes:
+      - ./xsnap:/work
+    command: ["test", "--pipeline"]
+    security_opt:
+      - seccomp=unconfined

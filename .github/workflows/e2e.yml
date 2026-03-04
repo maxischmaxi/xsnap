@@ -1,0 +1,31 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e-storybook-basic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: docker compose build storybook
+        working-directory: e2e/storybook-basic
+
+      - run: docker compose run --rm xsnap
+        working-directory: e2e/storybook-basic
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: xsnap-snapshots
+          path: |
+            e2e/storybook-basic/xsnap/__snapshots__/__current__/
+            e2e/storybook-basic/xsnap/__snapshots__/__updated__/
+
+      - run: docker compose down
+        if: always()
+        working-directory: e2e/storybook-basic
