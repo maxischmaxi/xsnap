@@ -1,6 +1,6 @@
 [package]
 name = "xsnap"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 description = "Visual regression testing tool"
 
@@ -55,7 +55,6 @@ anyhow = "1"
 libc = "0.2"
 
 # Misc
-num_cpus = "1"
 zip = "2"       # Chromium archive extraction
 dirs = "6"      # Platform cache directories
 

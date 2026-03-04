@@ -277,6 +277,115 @@ pub async fn execute_test_task(pool: &BrowserPool, task: &TestTask, no_create: b
     }
 }
 
+/// CPU-intensive image processing: decode, compare, and save snapshots.
+///
+/// Runs on a blocking thread (via `spawn_blocking`) to avoid starving the
+/// tokio async runtime. Without this, synchronous image work (MSSIM comparison,
+/// PNG decode/encode) would block tokio worker threads, preventing the browser
+/// event handler and CDP commands from being processed.
+#[allow(clippy::too_many_arguments)]
+fn process_images(
+    screenshot_bytes: Vec<u8>,
+    snapshot_path: PathBuf,
+    diff_path: PathBuf,
+    current_dir: PathBuf,
+    threshold: u32,
+    test_name: &str,
+    size: &Size,
+    no_create: bool,
+) -> Result<TestOutcome, XsnapError> {
+    // Decode screenshot into an image.
+    let current_img = image::load_from_memory(&screenshot_bytes)
+        .map_err(|e| XsnapError::ScreenshotFailed {
+            message: format!("Failed to decode screenshot: {}", e),
+        })?
+        .to_rgb8();
+
+    // Check if baseline exists.
+    if !snapshot_path.exists() {
+        if no_create {
+            return Ok(TestOutcome::Error {
+                message: format!(
+                    "No baseline snapshot exists and --no-create is set: {}",
+                    snapshot_path.display()
+                ),
+            });
+        }
+
+        // Create snapshot directory if needed.
+        if let Some(parent) = snapshot_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
+                message: format!("Failed to create snapshot directory: {}", e),
+            })?;
+        }
+
+        // Save the new baseline.
+        current_img
+            .save(&snapshot_path)
+            .map_err(|e| XsnapError::ScreenshotFailed {
+                message: format!("Failed to save snapshot: {}", e),
+            })?;
+
+        return Ok(TestOutcome::Created);
+    }
+
+    // Load baseline image.
+    let baseline_img = ImageReader::open(&snapshot_path)
+        .map_err(|e| XsnapError::DiffFailed {
+            message: format!("Failed to open baseline: {}", e),
+        })?
+        .decode()
+        .map_err(|e| XsnapError::DiffFailed {
+            message: format!("Failed to decode baseline: {}", e),
+        })?
+        .to_rgb8();
+
+    // Compare images.
+    match compare_images(&baseline_img, &current_img, threshold)? {
+        CompareResult::Pass => Ok(TestOutcome::Pass),
+        CompareResult::Fail { score, diff_image } => {
+            // Ensure __updated__ directory exists for diff and failed screenshots.
+            if let Some(parent) = diff_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
+                    message: format!("Failed to create updated directory: {}", e),
+                })?;
+            }
+
+            // Save the diff composite if we have a diff image.
+            let diff_path_str = diff_path.to_string_lossy().to_string();
+
+            if let Some(diff_img) = diff_image {
+                let composite = create_composite(&baseline_img, &diff_img, &current_img);
+                if let Err(e) = composite.save(&diff_path) {
+                    eprintln!("Warning: failed to save diff image: {}", e);
+                }
+            }
+
+            // Save the current screenshot into __current__ for reference.
+            let filename = snapshot_filename(test_name, size);
+            std::fs::create_dir_all(&current_dir).map_err(|e| XsnapError::ScreenshotFailed {
+                message: format!("Failed to create current directory: {}", e),
+            })?;
+            let current_path = current_dir.join(&filename);
+            if let Err(e) = current_img.save(&current_path) {
+                eprintln!("Warning: failed to save current screenshot: {}", e);
+            }
+
+            // Also save the current screenshot into __updated__ for the approve workflow.
+            let updated_dir = diff_path.parent().unwrap();
+            let updated_path = updated_dir.join(&filename);
+            if let Err(e) = current_img.save(&updated_path) {
+                eprintln!("Warning: failed to save updated screenshot: {}", e);
+            }
+
+            Ok(TestOutcome::Fail {
+                score,
+                diff_path: diff_path_str,
+            })
+        }
+    }
+}
+
 /// Execute a single attempt of a test task.
 async fn execute_single_attempt(
     pool: &BrowserPool,
@@ -287,7 +396,7 @@ async fn execute_single_attempt(
     no_create: bool,
 ) -> Result<TestOutcome, XsnapError> {
     // Acquire a page from the pool.
-    let (page, permit) = pool.acquire().await?;
+    let (page, _permit) = pool.acquire().await?;
 
     // Set viewport.
     set_viewport(&page, &task.size).await?;
@@ -323,102 +432,38 @@ async fn execute_single_attempt(
     // Capture screenshot.
     let screenshot_bytes = capture_screenshot(&page, task.full_screen).await?;
 
-    // Close the page first (browser interaction done), then release the permit.
-    // This ensures the permit is held for the entire duration of browser interaction
-    // but released before CPU-only image comparison work.
+    // Close the browser page early (no longer needed for image comparison).
+    // The semaphore permit is intentionally held until this function returns,
+    // so that the CPU-intensive image comparison counts toward the parallelism
+    // limit. Without this, N image comparisons could overlap with N new browser
+    // tasks, doubling the actual system load.
     drop(page);
-    drop(permit);
 
-    // Decode screenshot into an image.
-    let current_img = image::load_from_memory(&screenshot_bytes)
-        .map_err(|e| XsnapError::ScreenshotFailed {
-            message: format!("Failed to decode screenshot: {}", e),
-        })?
-        .to_rgb8();
+    // Move CPU-intensive image processing to a blocking thread to prevent
+    // starving the tokio runtime (browser event handler, CDP commands).
+    let snapshot_path = snapshot_path.to_path_buf();
+    let diff_path = diff_path.to_path_buf();
+    let current_dir = current_dir.to_path_buf();
+    let threshold = task.threshold;
+    let test_name = task.test.name.clone();
+    let size = task.size.clone();
 
-    // Check if baseline exists.
-    if !snapshot_path.exists() {
-        if no_create {
-            return Ok(TestOutcome::Error {
-                message: format!(
-                    "No baseline snapshot exists and --no-create is set: {}",
-                    snapshot_path.display()
-                ),
-            });
-        }
-
-        // Create snapshot directory if needed.
-        if let Some(parent) = snapshot_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
-                message: format!("Failed to create snapshot directory: {}", e),
-            })?;
-        }
-
-        // Save the new baseline.
-        current_img
-            .save(snapshot_path)
-            .map_err(|e| XsnapError::ScreenshotFailed {
-                message: format!("Failed to save snapshot: {}", e),
-            })?;
-
-        return Ok(TestOutcome::Created);
-    }
-
-    // Load baseline image.
-    let baseline_img = ImageReader::open(snapshot_path)
-        .map_err(|e| XsnapError::DiffFailed {
-            message: format!("Failed to open baseline: {}", e),
-        })?
-        .decode()
-        .map_err(|e| XsnapError::DiffFailed {
-            message: format!("Failed to decode baseline: {}", e),
-        })?
-        .to_rgb8();
-
-    // Compare images.
-    match compare_images(&baseline_img, &current_img, task.threshold)? {
-        CompareResult::Pass => Ok(TestOutcome::Pass),
-        CompareResult::Fail { score, diff_image } => {
-            // Ensure __updated__ directory exists for diff and failed screenshots.
-            if let Some(parent) = diff_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
-                    message: format!("Failed to create updated directory: {}", e),
-                })?;
-            }
-
-            // Save the diff composite if we have a diff image.
-            let diff_path_str = diff_path.to_string_lossy().to_string();
-
-            if let Some(diff_img) = diff_image {
-                let composite = create_composite(&baseline_img, &diff_img, &current_img);
-                if let Err(e) = composite.save(diff_path) {
-                    eprintln!("Warning: failed to save diff image: {}", e);
-                }
-            }
-
-            // Save the current screenshot into __current__ for reference.
-            let filename = snapshot_filename(&task.test.name, &task.size);
-            std::fs::create_dir_all(current_dir).map_err(|e| XsnapError::ScreenshotFailed {
-                message: format!("Failed to create current directory: {}", e),
-            })?;
-            let current_path = current_dir.join(&filename);
-            if let Err(e) = current_img.save(&current_path) {
-                eprintln!("Warning: failed to save current screenshot: {}", e);
-            }
-
-            // Also save the current screenshot into __updated__ for the approve workflow.
-            let updated_dir = diff_path.parent().unwrap();
-            let updated_path = updated_dir.join(&filename);
-            if let Err(e) = current_img.save(&updated_path) {
-                eprintln!("Warning: failed to save updated screenshot: {}", e);
-            }
-
-            Ok(TestOutcome::Fail {
-                score,
-                diff_path: diff_path_str,
-            })
-        }
-    }
+    tokio::task::spawn_blocking(move || {
+        process_images(
+            screenshot_bytes,
+            snapshot_path,
+            diff_path,
+            current_dir,
+            threshold,
+            &test_name,
+            &size,
+            no_create,
+        )
+    })
+    .await
+    .map_err(|e| XsnapError::ScreenshotFailed {
+        message: format!("Image processing task panicked: {}", e),
+    })?
 }
 
 // ---------------------------------------------------------------------------

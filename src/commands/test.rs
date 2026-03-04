@@ -94,10 +94,13 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
 
     let chrome_path = ensure_chromium(browser_version).await?;
 
-    let parallelism = opts
-        .parallelism
-        .or(global.parallelism)
-        .unwrap_or_else(|| num_cpus::get().max(1));
+    let parallelism = opts.parallelism.or(global.parallelism).unwrap_or(1);
+
+    // Safety cap: never exceed available CPU cores to prevent system overload.
+    let max_parallelism = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let parallelism = parallelism.min(max_parallelism);
 
     // Shared semaphore across all pools controls total parallelism.
     let semaphore = Arc::new(Semaphore::new(parallelism));
