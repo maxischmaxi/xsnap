@@ -40,6 +40,7 @@ struct TuiState {
     server_ready: bool,
     waiting_url: String,
     waiting_elapsed: u32,
+    completed_area_height: u16,
 }
 
 impl TuiState {
@@ -57,6 +58,7 @@ impl TuiState {
             server_ready: false,
             waiting_url: base_url,
             waiting_elapsed: 0,
+            completed_area_height: 0,
         }
     }
 
@@ -285,6 +287,8 @@ fn render_running(frame: &mut Frame, state: &TuiState, area: Rect) {
 }
 
 fn render_completed(frame: &mut Frame, state: &mut TuiState, area: Rect) {
+    state.completed_area_height = area.height;
+
     let title = format!(" Completed ({}) ", state.results.len());
 
     let header = Row::new(vec![
@@ -300,38 +304,57 @@ fn render_completed(frame: &mut Frame, state: &mut TuiState, area: Rect) {
             .fg(Color::Yellow),
     );
 
-    let rows: Vec<Row> = state
-        .results
-        .iter()
-        .map(|r| {
-            let (status_text, style) = match &r.outcome {
-                TestOutcome::Pass => ("PASS", Style::default().fg(Color::Green)),
-                TestOutcome::Created => ("NEW ", Style::default().fg(Color::Cyan)),
-                TestOutcome::Fail { .. } => ("FAIL", Style::default().fg(Color::Red)),
-                TestOutcome::Skipped => ("SKIP", Style::default().fg(Color::Yellow)),
-                TestOutcome::Error { .. } => (
-                    "ERR ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-            };
+    let mut rows: Vec<Row> = Vec::new();
+    let mut visual_index_map: Vec<usize> = Vec::new();
 
-            let size_str = format!("{}-{}x{}", r.size_name, r.width, r.height);
-            let duration_str = format!("{}ms", r.duration.as_millis());
-            let retry_str = if r.retries_used > 0 {
-                format!("{}x", r.retries_used)
-            } else {
-                "-".to_string()
-            };
+    for r in state.results.iter() {
+        let (status_text, style) = match &r.outcome {
+            TestOutcome::Pass => ("PASS", Style::default().fg(Color::Green)),
+            TestOutcome::Created => ("NEW ", Style::default().fg(Color::Cyan)),
+            TestOutcome::Fail { .. } => ("FAIL", Style::default().fg(Color::Red)),
+            TestOutcome::Skipped => ("SKIP", Style::default().fg(Color::Yellow)),
+            TestOutcome::Error { .. } => (
+                "ERR ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        };
 
-            Row::new(vec![
-                Cell::from(status_text).style(style),
-                Cell::from(r.test_name.as_str()),
-                Cell::from(size_str),
-                Cell::from(duration_str),
-                Cell::from(retry_str),
-            ])
-        })
-        .collect();
+        let size_str = format!("{}-{}x{}", r.size_name, r.width, r.height);
+        let duration_str = format!("{}ms", r.duration.as_millis());
+        let retry_str = if r.retries_used > 0 {
+            format!("{}x", r.retries_used)
+        } else {
+            "-".to_string()
+        };
+
+        visual_index_map.push(rows.len());
+
+        rows.push(Row::new(vec![
+            Cell::from(status_text).style(style),
+            Cell::from(r.test_name.as_str()),
+            Cell::from(size_str),
+            Cell::from(duration_str),
+            Cell::from(retry_str),
+        ]));
+
+        if let TestOutcome::Error { message } = &r.outcome {
+            rows.push(Row::new(vec![
+                Cell::from(""),
+                Cell::from(format!("\u{2192} {}", message))
+                    .style(Style::default().fg(Color::DarkGray)),
+                Cell::from(""),
+                Cell::from(""),
+                Cell::from(""),
+            ]));
+        }
+    }
+
+    let visual_selected = state
+        .table_state
+        .selected()
+        .and_then(|logical| visual_index_map.get(logical).copied());
+    let mut visual_table_state = TableState::default();
+    visual_table_state.select(visual_selected);
 
     let table = Table::new(
         rows,
@@ -347,7 +370,7 @@ fn render_completed(frame: &mut Frame, state: &mut TuiState, area: Rect) {
     .block(Block::default().borders(Borders::ALL).title(title))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-    frame.render_stateful_widget(table, area, &mut state.table_state);
+    frame.render_stateful_widget(table, area, &mut visual_table_state);
 }
 
 fn render_summary(frame: &mut Frame, state: &TuiState, area: Rect) {
