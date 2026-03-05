@@ -15,7 +15,7 @@ pub fn format_result_line(result: &TestResult) -> String {
         String::new()
     };
 
-    format!(
+    let mut line = format!(
         "[{}] {}-{}-{}x{} ({}ms){}",
         status,
         result.test_name,
@@ -24,7 +24,13 @@ pub fn format_result_line(result: &TestResult) -> String {
         result.height,
         result.duration.as_millis(),
         retries,
-    )
+    );
+
+    if let TestOutcome::Error { message } = &result.outcome {
+        line.push_str(&format!("\n       → {}", message));
+    }
+
+    line
 }
 
 pub fn github_annotation(result: &TestResult) -> String {

@@ -75,6 +75,19 @@ fn test_github_annotation_pass_is_empty() {
 }
 
 #[test]
+fn test_format_error_subline() {
+    let result = make_result(
+        "homepage",
+        TestOutcome::Error {
+            message: "Navigation timeout: http://localhost:3000".into(),
+        },
+    );
+    let line = format_result_line(&result);
+    assert!(line.contains("ERR"));
+    assert!(line.contains("→ Navigation timeout: http://localhost:3000"));
+}
+
+#[test]
 fn test_format_summary() {
     let summary = RunSummary {
         total: 10,
