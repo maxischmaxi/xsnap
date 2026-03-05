@@ -118,6 +118,31 @@ impl TuiState {
         }
     }
 
+    fn scroll_up_half_page(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+        let half = (self.completed_area_height as usize / 2).max(1);
+        let selected = self.table_state.selected().unwrap_or(0);
+        let new = selected.saturating_sub(half);
+        self.table_state.select(Some(new));
+        self.auto_scroll = false;
+    }
+
+    fn scroll_down_half_page(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+        let half = (self.completed_area_height as usize / 2).max(1);
+        let max = self.results.len() - 1;
+        let selected = self.table_state.selected().unwrap_or(0);
+        let new = (selected + half).min(max);
+        self.table_state.select(Some(new));
+        if new == max {
+            self.auto_scroll = true;
+        }
+    }
+
     fn progress_ratio(&self) -> f64 {
         if self.total_tasks == 0 {
             return 1.0;
@@ -514,6 +539,14 @@ async fn run_tui_inner(
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 return Ok(make_summary(&state, total_tasks));
                             }
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                state.scroll_down_half_page();
+                                terminal.draw(|frame| render(frame, &mut state))?;
+                            }
+                            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                state.scroll_up_half_page();
+                                terminal.draw(|frame| render(frame, &mut state))?;
+                            }
                             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 return Ok(make_summary(&state, total_tasks));
                             }
@@ -523,6 +556,14 @@ async fn run_tui_inner(
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 state.scroll_down();
+                                terminal.draw(|frame| render(frame, &mut state))?;
+                            }
+                            KeyCode::PageDown => {
+                                state.scroll_down_half_page();
+                                terminal.draw(|frame| render(frame, &mut state))?;
+                            }
+                            KeyCode::PageUp => {
+                                state.scroll_up_half_page();
                                 terminal.draw(|frame| render(frame, &mut state))?;
                             }
                             _ => {}
