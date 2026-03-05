@@ -16,7 +16,9 @@ fn test_deserialize_minimal_global_config() {
     assert!(config.ignore_patterns.is_empty());
     assert!(config.default_sizes.is_none());
     assert!(config.functions.is_empty());
-    assert_eq!(config.snapshot_directory, "__snapshots__");
+    assert_eq!(config.base_directory, "__snapshots__/__base_images__");
+    assert_eq!(config.diff_directory, "__snapshots__/__diff__");
+    assert_eq!(config.updated_directory, "__snapshots__/__updated__");
     assert_eq!(config.threshold, 0);
     assert_eq!(config.retry, 1);
     assert!(config.parallelism.is_none());
@@ -49,7 +51,9 @@ fn test_deserialize_full_global_config() {
                 { "action": "type", "selector": "#username", "text": "admin" }
             ]
         },
-        "snapshotDirectory": "my_snapshots",
+        "baseDirectory": "my_snapshots/__base_images__",
+        "diffDirectory": "my_snapshots/__diff__",
+        "updatedDirectory": "my_snapshots/__updated__",
         "threshold": 5,
         "retry": 3,
         "parallelism": 4,
@@ -88,7 +92,9 @@ fn test_deserialize_full_global_config() {
     let login_fn = config.functions.get("login").unwrap();
     assert_eq!(login_fn.len(), 2);
 
-    assert_eq!(config.snapshot_directory, "my_snapshots");
+    assert_eq!(config.base_directory, "my_snapshots/__base_images__");
+    assert_eq!(config.diff_directory, "my_snapshots/__diff__");
+    assert_eq!(config.updated_directory, "my_snapshots/__updated__");
     assert_eq!(config.threshold, 5);
     assert_eq!(config.retry, 3);
     assert_eq!(config.parallelism, Some(4));

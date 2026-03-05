@@ -19,16 +19,18 @@ pub fn run_approve(opts: ApproveOptions) -> anyhow::Result<()> {
     let config_path = Path::new(&opts.config);
     let global = load_global_config(config_path)?;
 
-    let snapshot_dir = PathBuf::from(&global.snapshot_directory);
-    let updated_dir = snapshot_dir.join("__updated__");
-    let base_dir = snapshot_dir.join("__base_images__");
+    let updated_dir = PathBuf::from(&global.updated_directory);
+    let base_dir = PathBuf::from(&global.base_directory);
 
     if !updated_dir.exists() {
-        println!("No __updated__ directory found. Nothing to approve.");
+        println!("No updated directory found. Nothing to approve.");
         return Ok(());
     }
 
-    // 2. List files in __updated__, skipping .diff. files.
+    // Also clean up corresponding diff files.
+    let diff_dir = PathBuf::from(&global.diff_directory);
+
+    // 2. List files in updated directory, skipping .diff. files.
     let mut candidates: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(&updated_dir)? {
         let entry = entry?;
@@ -110,26 +112,14 @@ pub fn run_approve(opts: ApproveOptions) -> anyhow::Result<()> {
             println!("  Approved: {}", filename);
             approved_count += 1;
 
-            // 5. Clean up: remove the approved file from __updated__.
+            // 5. Clean up: remove the approved file from updated directory.
             std::fs::remove_file(candidate)?;
 
             // Also remove the corresponding diff file if it exists.
-            let diff_name_dot = filename.replace(".png", ".diff.png");
             let diff_name_dash = filename.replace(".png", "-diff.png");
-            let diff_path_dot = updated_dir.join(&diff_name_dot);
-            let diff_path_dash = updated_dir.join(&diff_name_dash);
-            if diff_path_dot.exists() {
-                let _ = std::fs::remove_file(&diff_path_dot);
-            }
+            let diff_path_dash = diff_dir.join(&diff_name_dash);
             if diff_path_dash.exists() {
                 let _ = std::fs::remove_file(&diff_path_dash);
-            }
-
-            // Remove the current screenshot if it exists.
-            let current_name = filename.replace(".png", "-current.png");
-            let current_path = updated_dir.join(&current_name);
-            if current_path.exists() {
-                let _ = std::fs::remove_file(&current_path);
             }
         } else {
             println!("  Skipped: {}", filename);

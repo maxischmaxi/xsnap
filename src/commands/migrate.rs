@@ -306,6 +306,9 @@ fn run_migrate_tui(items: Vec<MigrateItem>) -> io::Result<MigrateTuiState> {
     let mut terminal = ratatui::init();
     let result = run_migrate_tui_inner(&mut terminal, items);
     ratatui::restore();
+    // Ensure raw mode is fully disabled so subsequent println! calls produce
+    // proper \r\n line endings instead of bare \n (which causes staircase output).
+    let _ = crossterm::terminal::disable_raw_mode();
     result
 }
 
@@ -457,6 +460,7 @@ pub fn run_migrate(opts: MigrateOptions) -> anyhow::Result<()> {
 /// Transform a parsed OSnap config JSON for xsnap:
 /// - Add `$schema`
 /// - Rewrite `testPattern` from `.osnap.yaml`/`.osnap.yml` to `.xsnap.jsonc`
+/// - Transform `snapshotDirectory` into `baseDirectory`, `diffDirectory`, `updatedDirectory`
 fn migrate_config_json(value: &mut serde_json::Value) {
     if let Some(obj) = value.as_object_mut() {
         // Insert $schema at the top (serde_json Map is ordered by insertion for BTreeMap,
@@ -477,6 +481,27 @@ fn migrate_config_json(value: &mut serde_json::Value) {
                 .replace(".osnap.yaml", ".xsnap.jsonc")
                 .replace(".osnap.yml", ".xsnap.jsonc");
             *pattern_val = serde_json::Value::String(new_pattern);
+        }
+
+        // Transform snapshotDirectory → baseDirectory, diffDirectory, updatedDirectory
+        let snapshot_dir = obj
+            .remove("snapshotDirectory")
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+
+        if let Some(prefix) = snapshot_dir {
+            let prefix = prefix.trim_end_matches('/');
+            obj.insert(
+                "baseDirectory".to_string(),
+                serde_json::Value::String(format!("{}/__base_images__", prefix)),
+            );
+            obj.insert(
+                "diffDirectory".to_string(),
+                serde_json::Value::String(format!("{}/__diff__", prefix)),
+            );
+            obj.insert(
+                "updatedDirectory".to_string(),
+                serde_json::Value::String(format!("{}/__updated__", prefix)),
+            );
         }
     }
 }
@@ -970,7 +995,7 @@ defaultSizes:
 
         std::fs::write(
             &source,
-            "baseUrl: http://localhost\ntestPattern: \"src/**/*.osnap.yaml\"\n",
+            "baseUrl: http://localhost\ntestPattern: \"src/**/*.osnap.yaml\"\nsnapshotDirectory: \"../__image-snapshots__\"\n",
         )
         .unwrap();
 
@@ -996,6 +1021,17 @@ defaultSizes:
             "https://raw.githubusercontent.com/maxischmaxi/xsnap/main/xsnap.schema.json"
         );
         assert_eq!(result["testPattern"], "src/**/*.xsnap.jsonc");
+        // snapshotDirectory should be transformed into 3 separate fields
+        assert!(result.get("snapshotDirectory").is_none());
+        assert_eq!(
+            result["baseDirectory"],
+            "../__image-snapshots__/__base_images__"
+        );
+        assert_eq!(result["diffDirectory"], "../__image-snapshots__/__diff__");
+        assert_eq!(
+            result["updatedDirectory"],
+            "../__image-snapshots__/__updated__"
+        );
     }
 
     #[test]

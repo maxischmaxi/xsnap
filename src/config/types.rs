@@ -30,8 +30,14 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub functions: HashMap<String, Vec<Action>>,
 
-    #[serde(default = "default_snapshot_dir")]
-    pub snapshot_directory: String,
+    #[serde(default = "default_base_dir")]
+    pub base_directory: String,
+
+    #[serde(default = "default_diff_dir")]
+    pub diff_directory: String,
+
+    #[serde(default = "default_updated_dir")]
+    pub updated_directory: String,
 
     #[serde(default)]
     pub threshold: u32,
@@ -279,8 +285,16 @@ fn default_test_pattern() -> String {
     "tests/**/*.xsnap.jsonc".into()
 }
 
-fn default_snapshot_dir() -> String {
-    "__snapshots__".into()
+fn default_base_dir() -> String {
+    "__snapshots__/__base_images__".into()
+}
+
+fn default_diff_dir() -> String {
+    "__snapshots__/__diff__".into()
+}
+
+fn default_updated_dir() -> String {
+    "__snapshots__/__updated__".into()
 }
 
 fn default_retry() -> u32 {

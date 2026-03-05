@@ -30,6 +30,10 @@ pub async fn set_viewport(page: &Page, size: &Size) -> Result<(), XsnapError> {
 }
 
 /// Navigates the page to the given URL with a timeout.
+///
+/// After the `load` event fires, this waits for two animation frames so that
+/// JavaScript frameworks (React, Vue, …) have a chance to mount and paint
+/// before a screenshot is taken.
 pub async fn navigate(page: &Page, url: &str) -> Result<(), XsnapError> {
     tokio::time::timeout(NAVIGATION_TIMEOUT, page.goto(url))
         .await
@@ -43,6 +47,19 @@ pub async fn navigate(page: &Page, url: &str) -> Result<(), XsnapError> {
         .map_err(|e| XsnapError::NavigationFailed {
             url: url.to_string(),
             message: format!("{}", e),
+        })?;
+
+    // Wait for the page to actually render. The `load` event fires before JS
+    // frameworks have mounted their component trees.  Two requestAnimationFrame
+    // callbacks guarantee that the browser has committed at least one full paint
+    // cycle, which is sufficient for synchronous React/Vue/Svelte renders.
+    // For pages that do heavy async work on mount, users can add an explicit
+    // `Wait` action in their test config.
+    page.evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
+        .await
+        .map_err(|e| XsnapError::NavigationFailed {
+            url: url.to_string(),
+            message: format!("Failed to wait for render: {}", e),
         })?;
 
     Ok(())

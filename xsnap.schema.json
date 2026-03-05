@@ -3,6 +3,10 @@
   "title": "GlobalConfig",
   "type": "object",
   "properties": {
+    "baseDirectory": {
+      "type": "string",
+      "default": "__snapshots__/__base_images__"
+    },
     "baseUrl": {
       "type": "string"
     },
@@ -26,6 +30,10 @@
       "items": {
         "$ref": "#/$defs/Size"
       }
+    },
+    "diffDirectory": {
+      "type": "string",
+      "default": "__snapshots__/__diff__"
     },
     "diffPixelColor": {
       "$ref": "#/$defs/Color",
@@ -78,10 +86,6 @@
       "default": 1,
       "minimum": 0
     },
-    "snapshotDirectory": {
-      "type": "string",
-      "default": "__snapshots__"
-    },
     "startCommand": {
       "type": [
         "string",
@@ -105,6 +109,10 @@
       "format": "uint32",
       "default": 0,
       "minimum": 0
+    },
+    "updatedDirectory": {
+      "type": "string",
+      "default": "__snapshots__/__updated__"
     }
   },
   "required": [

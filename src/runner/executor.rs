@@ -29,7 +29,9 @@ pub struct TestTask {
     pub full_screen: bool,
     pub threshold: u32,
     pub retry: u32,
-    pub snapshot_dir: PathBuf,
+    pub base_dir: PathBuf,
+    pub diff_dir: PathBuf,
+    pub updated_dir: PathBuf,
     pub actions: Vec<Action>,
     pub http_headers: HashMap<String, String>,
     pub browser_fingerprint: String,
@@ -42,11 +44,11 @@ pub struct TestTask {
 /// Progress update sent to the UI.
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
+    ServerWaiting { url: String, elapsed_secs: u32 },
+    ServerReady,
     TestStarted { name: String, size: String },
     TestCompleted(TestResult),
     RunCompleted(RunSummary),
-    ServerWaiting { attempt: u32, max_attempts: u32 },
-    ServerReady,
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +168,9 @@ pub fn build_test_tasks(
                 full_screen: global.full_screen,
                 threshold,
                 retry,
-                snapshot_dir: PathBuf::from(&global.snapshot_directory),
+                base_dir: PathBuf::from(&global.base_directory),
+                diff_dir: PathBuf::from(&global.diff_directory),
+                updated_dir: PathBuf::from(&global.updated_directory),
                 actions: actions.clone(),
                 http_headers: http_headers.clone(),
                 browser_fingerprint: fingerprint.clone(),
@@ -211,17 +215,11 @@ pub async fn execute_test_task(pool: &BrowserPool, task: &TestTask, no_create: b
 
     let filename = snapshot_filename(&task.test.name, &task.size);
 
-    // Use subdirectory structure: __base_images__ for baselines, __updated__ for
-    // failed current screenshots and diffs, __current__ for current screenshots.
-    let base_images_dir = task.snapshot_dir.join("__base_images__");
-    let current_dir = task.snapshot_dir.join("__current__");
-    let updated_dir = task.snapshot_dir.join("__updated__");
-
-    let snapshot_path = base_images_dir.join(&filename);
+    let snapshot_path = task.base_dir.join(&filename);
 
     let diff_stem = filename.trim_end_matches(".png");
     let diff_filename = format!("{}-diff.png", diff_stem);
-    let diff_path = updated_dir.join(&diff_filename);
+    let diff_path = task.diff_dir.join(&diff_filename);
 
     // Retry loop.
     let mut last_outcome = TestOutcome::Error {
@@ -235,16 +233,7 @@ pub async fn execute_test_task(pool: &BrowserPool, task: &TestTask, no_create: b
             retries_used = attempt;
         }
 
-        match execute_single_attempt(
-            pool,
-            task,
-            &snapshot_path,
-            &diff_path,
-            &current_dir,
-            no_create,
-        )
-        .await
-        {
+        match execute_single_attempt(pool, task, &snapshot_path, &diff_path, no_create).await {
             Ok(outcome) => {
                 if outcome.is_pass() || attempt == task.retry {
                     last_outcome = outcome;
@@ -288,7 +277,7 @@ fn process_images(
     screenshot_bytes: Vec<u8>,
     snapshot_path: PathBuf,
     diff_path: PathBuf,
-    current_dir: PathBuf,
+    updated_dir: PathBuf,
     threshold: u32,
     test_name: &str,
     size: &Size,
@@ -312,10 +301,10 @@ fn process_images(
             });
         }
 
-        // Create snapshot directory if needed.
+        // Create base directory if needed.
         if let Some(parent) = snapshot_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
-                message: format!("Failed to create snapshot directory: {}", e),
+                message: format!("Failed to create base directory: {}", e),
             })?;
         }
 
@@ -344,10 +333,10 @@ fn process_images(
     match compare_images(&baseline_img, &current_img, threshold)? {
         CompareResult::Pass => Ok(TestOutcome::Pass),
         CompareResult::Fail { score, diff_image } => {
-            // Ensure __updated__ directory exists for diff and failed screenshots.
+            // Ensure diff directory exists.
             if let Some(parent) = diff_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| XsnapError::ScreenshotFailed {
-                    message: format!("Failed to create updated directory: {}", e),
+                    message: format!("Failed to create diff directory: {}", e),
                 })?;
             }
 
@@ -361,18 +350,11 @@ fn process_images(
                 }
             }
 
-            // Save the current screenshot into __current__ for reference.
+            // Save the current screenshot into updated directory for the approve workflow.
             let filename = snapshot_filename(test_name, size);
-            std::fs::create_dir_all(&current_dir).map_err(|e| XsnapError::ScreenshotFailed {
-                message: format!("Failed to create current directory: {}", e),
+            std::fs::create_dir_all(&updated_dir).map_err(|e| XsnapError::ScreenshotFailed {
+                message: format!("Failed to create updated directory: {}", e),
             })?;
-            let current_path = current_dir.join(&filename);
-            if let Err(e) = current_img.save(&current_path) {
-                eprintln!("Warning: failed to save current screenshot: {}", e);
-            }
-
-            // Also save the current screenshot into __updated__ for the approve workflow.
-            let updated_dir = diff_path.parent().unwrap();
             let updated_path = updated_dir.join(&filename);
             if let Err(e) = current_img.save(&updated_path) {
                 eprintln!("Warning: failed to save updated screenshot: {}", e);
@@ -392,7 +374,6 @@ async fn execute_single_attempt(
     task: &TestTask,
     snapshot_path: &Path,
     diff_path: &Path,
-    current_dir: &Path,
     no_create: bool,
 ) -> Result<TestOutcome, XsnapError> {
     // Acquire a page from the pool.
@@ -432,18 +413,17 @@ async fn execute_single_attempt(
     // Capture screenshot.
     let screenshot_bytes = capture_screenshot(&page, task.full_screen).await?;
 
-    // Close the browser page early (no longer needed for image comparison).
-    // The semaphore permit is intentionally held until this function returns,
-    // so that the CPU-intensive image comparison counts toward the parallelism
-    // limit. Without this, N image comparisons could overlap with N new browser
-    // tasks, doubling the actual system load.
-    drop(page);
+    // Close the browser page explicitly to free CDP session resources, then
+    // drop the handle. The semaphore permit is intentionally held until this
+    // function returns, so that the CPU-intensive image comparison counts
+    // toward the parallelism limit.
+    let _ = page.close().await;
 
     // Move CPU-intensive image processing to a blocking thread to prevent
     // starving the tokio runtime (browser event handler, CDP commands).
     let snapshot_path = snapshot_path.to_path_buf();
     let diff_path = diff_path.to_path_buf();
-    let current_dir = current_dir.to_path_buf();
+    let updated_dir = task.updated_dir.clone();
     let threshold = task.threshold;
     let test_name = task.test.name.clone();
     let size = task.size.clone();
@@ -453,7 +433,7 @@ async fn execute_single_attempt(
             screenshot_bytes,
             snapshot_path,
             diff_path,
-            current_dir,
+            updated_dir,
             threshold,
             &test_name,
             &size,
@@ -471,74 +451,66 @@ async fn execute_single_attempt(
 // ---------------------------------------------------------------------------
 
 /// Run all test tasks with parallel execution and progress reporting.
-///
-/// Tasks are spawned concurrently (limited by the shared semaphore across all
-/// pools). Progress events are sent through the provided channel.
 pub async fn run_all(
     pools: Arc<HashMap<String, Arc<BrowserPool>>>,
     tasks: Vec<TestTask>,
     no_create: bool,
+    parallelism: usize,
     progress_tx: Option<mpsc::UnboundedSender<ProgressEvent>>,
 ) -> RunSummary {
+    use futures::stream::{self, StreamExt};
+
     let start = Instant::now();
     let total = tasks.len();
 
-    let mut handles = Vec::with_capacity(total);
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut created = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = 0usize;
 
-    for task in tasks {
-        let pool = pools
-            .get(&task.browser_fingerprint)
-            .expect("pool must exist for fingerprint")
-            .clone();
-        let tx = progress_tx.clone();
+    let mut result_stream = stream::iter(tasks)
+        .map(|task| {
+            let pool = pools
+                .get(&task.browser_fingerprint)
+                .expect("pool must exist for fingerprint")
+                .clone();
+            let tx = progress_tx.clone();
 
-        let handle = tokio::spawn(async move {
-            // Notify start.
-            if let Some(ref tx) = tx {
-                let _ = tx.send(ProgressEvent::TestStarted {
-                    name: task.test.name.clone(),
-                    size: format!(
-                        "{}-{}x{}",
-                        task.size.name, task.size.width, task.size.height
-                    ),
-                });
+            async move {
+                if let Some(ref tx) = tx {
+                    let _ = tx.send(ProgressEvent::TestStarted {
+                        name: task.test.name.clone(),
+                        size: format!(
+                            "{}-{}x{}",
+                            task.size.name, task.size.width, task.size.height
+                        ),
+                    });
+                }
+
+                let result = execute_test_task(&pool, &task, no_create).await;
+
+                if let Some(ref tx) = tx {
+                    let _ = tx.send(ProgressEvent::TestCompleted(result.clone()));
+                }
+
+                result
             }
+        })
+        .buffer_unordered(parallelism);
 
-            let result = execute_test_task(&pool, &task, no_create).await;
-
-            // Notify completion.
-            if let Some(ref tx) = tx {
-                let _ = tx.send(ProgressEvent::TestCompleted(result.clone()));
-            }
-
-            result
-        });
-
-        handles.push(handle);
-    }
-
-    // Collect all results.
-    let mut passed = 0;
-    let mut failed = 0;
-    let mut created = 0;
-    let mut skipped = 0;
-    let mut errors = 0;
-
-    for handle in handles {
-        match handle.await {
-            Ok(result) => match &result.outcome {
-                TestOutcome::Pass => passed += 1,
-                TestOutcome::Created => created += 1,
-                TestOutcome::Fail { .. } => failed += 1,
-                TestOutcome::Skipped => skipped += 1,
-                TestOutcome::Error { .. } => errors += 1,
-            },
-            Err(e) => {
-                eprintln!("Task panicked: {}", e);
-                errors += 1;
-            }
+    while let Some(result) = result_stream.next().await {
+        match &result.outcome {
+            TestOutcome::Pass => passed += 1,
+            TestOutcome::Created => created += 1,
+            TestOutcome::Fail { .. } => failed += 1,
+            TestOutcome::Skipped => skipped += 1,
+            TestOutcome::Error { .. } => errors += 1,
         }
     }
+
+    // Drop the stream to release the borrow on progress_tx.
+    drop(result_stream);
 
     let summary = RunSummary {
         total,
@@ -550,7 +522,6 @@ pub async fn run_all(
         duration: start.elapsed(),
     };
 
-    // Notify run completed.
     if let Some(tx) = progress_tx {
         let _ = tx.send(ProgressEvent::RunCompleted(summary.clone()));
     }
@@ -696,7 +667,9 @@ mod tests {
                 },
             ]),
             functions: HashMap::new(),
-            snapshot_directory: "__snapshots__".into(),
+            base_directory: "__snapshots__/__base_images__".into(),
+            diff_directory: "__snapshots__/__diff__".into(),
+            updated_directory: "__snapshots__/__updated__".into(),
             threshold: 10,
             retry: 2,
             parallelism: None,
@@ -751,7 +724,9 @@ mod tests {
                 height: 1080,
             }]),
             functions: HashMap::new(),
-            snapshot_directory: "__snapshots__".into(),
+            base_directory: "__snapshots__/__base_images__".into(),
+            diff_directory: "__snapshots__/__diff__".into(),
+            updated_directory: "__snapshots__/__updated__".into(),
             threshold: 10,
             retry: 2,
             parallelism: None,
@@ -814,7 +789,9 @@ mod tests {
             ignore_patterns: vec![],
             default_sizes: None,
             functions: HashMap::new(),
-            snapshot_directory: "__snapshots__".into(),
+            base_directory: "__snapshots__/__base_images__".into(),
+            diff_directory: "__snapshots__/__diff__".into(),
+            updated_directory: "__snapshots__/__updated__".into(),
             threshold: 0,
             retry: 1,
             parallelism: None,
@@ -954,7 +931,9 @@ mod tests {
                 height: 1080,
             }]),
             functions: HashMap::new(),
-            snapshot_directory: "__snapshots__".into(),
+            base_directory: "__snapshots__/__base_images__".into(),
+            diff_directory: "__snapshots__/__diff__".into(),
+            updated_directory: "__snapshots__/__updated__".into(),
             threshold: 0,
             retry: 1,
             parallelism: None,

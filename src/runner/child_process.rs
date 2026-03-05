@@ -1,11 +1,8 @@
 use std::process::Stdio;
-use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-
-use crate::runner::executor::ProgressEvent;
 
 /// Manages a child process (e.g. a dev server) spawned via `sh -c`.
 ///
@@ -108,41 +105,4 @@ impl ChildProcess {
 
         let _ = self.child.wait().await;
     }
-}
-
-/// Poll the server URL until it responds (any HTTP status counts as ready).
-///
-/// Returns `true` if the server became reachable, `false` after exhausting
-/// all attempts. Progress events are sent to the UI channel.
-pub async fn wait_for_server(
-    url: &str,
-    max_attempts: u32,
-    tx: &mpsc::UnboundedSender<ProgressEvent>,
-) -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .unwrap();
-
-    for attempt in 1..=max_attempts {
-        let _ = tx.send(ProgressEvent::ServerWaiting {
-            attempt,
-            max_attempts,
-        });
-
-        match client.get(url).send().await {
-            Ok(_) => {
-                let _ = tx.send(ProgressEvent::ServerReady);
-                return true;
-            }
-            Err(_) => {
-                if attempt < max_attempts {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                }
-            }
-        }
-    }
-
-    false
 }

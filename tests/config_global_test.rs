@@ -9,7 +9,9 @@ fn test_load_jsonc_with_comments() {
         "baseUrl": "http://localhost:3000",
         /* This is a block comment */
         "threshold": 5,
-        "snapshotDirectory": "my_snapshots"
+        "baseDirectory": "my_snapshots/__base_images__",
+        "diffDirectory": "my_snapshots/__diff__",
+        "updatedDirectory": "my_snapshots/__updated__"
     }"#;
 
     let mut file = NamedTempFile::new().unwrap();
@@ -20,7 +22,9 @@ fn test_load_jsonc_with_comments() {
 
     assert_eq!(config.base_url, "http://localhost:3000");
     assert_eq!(config.threshold, 5);
-    assert_eq!(config.snapshot_directory, "my_snapshots");
+    assert_eq!(config.base_directory, "my_snapshots/__base_images__");
+    assert_eq!(config.diff_directory, "my_snapshots/__diff__");
+    assert_eq!(config.updated_directory, "my_snapshots/__updated__");
     // Defaults should still be applied
     assert!(config.full_screen);
     assert_eq!(config.retry, 1);

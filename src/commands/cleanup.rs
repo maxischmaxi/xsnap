@@ -53,12 +53,11 @@ pub fn run_cleanup(opts: CleanupOptions) -> anyhow::Result<()> {
         }
     }
 
-    // 3. Scan __base_images__ directory.
-    let snapshot_dir = PathBuf::from(&global.snapshot_directory);
-    let base_images_dir = snapshot_dir.join("__base_images__");
+    // 3. Scan base images directory.
+    let base_images_dir = PathBuf::from(&global.base_directory);
 
     if !base_images_dir.exists() {
-        println!("No __base_images__ directory found. Nothing to clean up.");
+        println!("No base directory found. Nothing to clean up.");
         return Ok(());
     }
 

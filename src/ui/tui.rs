@@ -1,19 +1,26 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
-use futures::StreamExt;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{
+        Block, Borders, Cell, Gauge, List, ListItem, Paragraph, Row, Table, TableState, Wrap,
+    },
 };
 use tokio::sync::mpsc;
 
 use crate::runner::executor::ProgressEvent;
 use crate::runner::result::{RunSummary, TestOutcome, TestResult};
+
+// ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 // ---------------------------------------------------------------------------
 // TuiState
@@ -25,32 +32,43 @@ struct TuiState {
     completed: usize,
     results: Vec<TestResult>,
     table_state: TableState,
+    auto_scroll: bool,
     summary: Option<RunSummary>,
     running: Vec<String>,
     logs: Vec<String>,
     start_command: Option<String>,
-    server_status: Option<(u32, u32)>,
     server_ready: bool,
+    waiting_url: String,
+    waiting_elapsed: u32,
 }
 
 impl TuiState {
-    fn new(total_tasks: usize, start_command: Option<String>) -> Self {
+    fn new(total_tasks: usize, start_command: Option<String>, base_url: String) -> Self {
         Self {
             total_tasks,
             completed: 0,
             results: Vec::new(),
             table_state: TableState::default(),
+            auto_scroll: true,
             summary: None,
             running: Vec::new(),
             logs: Vec::new(),
             start_command,
-            server_status: None,
             server_ready: false,
+            waiting_url: base_url,
+            waiting_elapsed: 0,
         }
     }
 
     fn handle_event(&mut self, event: ProgressEvent) {
         match event {
+            ProgressEvent::ServerWaiting { url, elapsed_secs } => {
+                self.waiting_url = url;
+                self.waiting_elapsed = elapsed_secs;
+            }
+            ProgressEvent::ServerReady => {
+                self.server_ready = true;
+            }
             ProgressEvent::TestStarted { name, size } => {
                 self.running.push(format!("{} ({})", name, size));
             }
@@ -63,18 +81,14 @@ impl TuiState {
                 self.running.retain(|r| *r != label);
                 self.completed += 1;
                 self.results.push(result);
+
+                // Auto-scroll to latest result.
+                if self.auto_scroll {
+                    self.table_state.select(Some(self.results.len() - 1));
+                }
             }
             ProgressEvent::RunCompleted(summary) => {
                 self.summary = Some(summary);
-            }
-            ProgressEvent::ServerWaiting {
-                attempt,
-                max_attempts,
-            } => {
-                self.server_status = Some((attempt, max_attempts));
-            }
-            ProgressEvent::ServerReady => {
-                self.server_ready = true;
             }
         }
     }
@@ -83,18 +97,22 @@ impl TuiState {
         let selected = self.table_state.selected().unwrap_or(0);
         if selected > 0 {
             self.table_state.select(Some(selected - 1));
+            self.auto_scroll = false;
         }
     }
 
     fn scroll_down(&mut self) {
-        let max = if self.results.is_empty() {
-            0
-        } else {
-            self.results.len() - 1
-        };
+        if self.results.is_empty() {
+            return;
+        }
+        let max = self.results.len() - 1;
         let selected = self.table_state.selected().unwrap_or(0);
         if selected < max {
             self.table_state.select(Some(selected + 1));
+            // Re-enable auto-scroll when user reaches the bottom.
+            if selected + 1 == max {
+                self.auto_scroll = true;
+            }
         }
     }
 
@@ -115,59 +133,160 @@ impl TuiState {
 // ---------------------------------------------------------------------------
 
 fn render(frame: &mut Frame, state: &mut TuiState) {
-    let area = frame.area();
-
-    if state.has_logs() {
-        // Horizontal split: tests (60%) | logs (40%)
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-                .areas(area);
-
-        render_tests(frame, state, left);
-        render_logs(frame, state, right);
+    if state.server_ready {
+        render_testing(frame, state);
     } else {
-        render_tests(frame, state, area);
+        render_waiting(frame, state);
     }
 }
 
-fn render_tests(frame: &mut Frame, state: &mut TuiState, area: Rect) {
-    // Layout: [Gauge 3 rows] [Table (fill)] [Summary 3 rows]
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(5),
-        Constraint::Length(3),
-    ])
-    .split(area);
+// ---------------------------------------------------------------------------
+// Waiting phase
+// ---------------------------------------------------------------------------
 
-    // -- Progress gauge --
-    if let Some((attempt, max)) = state.server_status {
-        if !state.server_ready {
-            let gauge = Gauge::default()
-                .block(Block::default().borders(Borders::ALL).title(" Server "))
-                .gauge_style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
-                .ratio(attempt as f64 / max as f64)
-                .label(format!("Waiting for server... ({}/{})", attempt, max));
-            frame.render_widget(gauge, chunks[0]);
-        } else {
-            let progress_label = format!("{}/{}", state.completed, state.total_tasks);
-            let gauge = Gauge::default()
-                .block(Block::default().borders(Borders::ALL).title(" Progress "))
-                .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
-                .ratio(state.progress_ratio())
-                .label(progress_label);
-            frame.render_widget(gauge, chunks[0]);
-        }
+fn render_waiting(frame: &mut Frame, state: &mut TuiState) {
+    let area = frame.area();
+
+    // Layout: [Waiting 3] [Logs (fill) | or empty fill] [Summary 3]
+    let mut constraints = vec![Constraint::Length(3)]; // waiting status
+    if state.has_logs() {
+        constraints.push(Constraint::Min(5)); // logs
     } else {
-        let progress_label = format!("{}/{}", state.completed, state.total_tasks);
-        let gauge = Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title(" Progress "))
-            .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
-            .ratio(state.progress_ratio())
-            .label(progress_label);
-        frame.render_widget(gauge, chunks[0]);
+        constraints.push(Constraint::Min(1)); // empty fill
+    }
+    constraints.push(Constraint::Length(3)); // summary
+
+    let chunks = Layout::vertical(constraints).split(area);
+
+    let waiting_area = chunks[0];
+    let middle_area = chunks[1];
+    let summary_area = chunks[2];
+
+    // Waiting status bar with spinner.
+    let spinner = SPINNER_CHARS[(state.waiting_elapsed as usize) % SPINNER_CHARS.len()];
+    let elapsed_text = if state.waiting_elapsed > 0 {
+        format!(" ({}s)", state.waiting_elapsed)
+    } else {
+        String::new()
+    };
+
+    let waiting_text = Line::from(vec![
+        Span::styled(format!("{} ", spinner), Style::default().fg(Color::Yellow)),
+        Span::raw(format!(
+            "Waiting for {}...{}",
+            state.waiting_url, elapsed_text
+        )),
+    ]);
+
+    let waiting_widget = Paragraph::new(waiting_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Waiting ")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+    frame.render_widget(waiting_widget, waiting_area);
+
+    // Middle: logs panel or empty block.
+    if state.has_logs() {
+        render_logs(frame, state, middle_area);
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(block, middle_area);
     }
 
-    // -- Results table --
+    // Summary bar.
+    let summary_text = Line::from(vec![
+        Span::styled("Waiting for server", Style::default().fg(Color::Yellow)),
+        Span::raw("  |  Press q to quit"),
+    ]);
+    let summary_bar = Paragraph::new(summary_text)
+        .block(Block::default().borders(Borders::ALL).title(" Summary "));
+    frame.render_widget(summary_bar, summary_area);
+}
+
+// ---------------------------------------------------------------------------
+// Testing phase
+// ---------------------------------------------------------------------------
+
+fn render_testing(frame: &mut Frame, state: &mut TuiState) {
+    let area = frame.area();
+
+    // Vertical: [Gauge 3] [Lists (fill)] [Logs if applicable] [Summary 3]
+    let mut vertical_constraints = vec![
+        Constraint::Length(3), // gauge
+        Constraint::Min(5),    // running + completed lists
+    ];
+    if state.has_logs() {
+        vertical_constraints.push(Constraint::Length(10)); // logs
+    }
+    vertical_constraints.push(Constraint::Length(3)); // summary
+
+    let main_chunks = Layout::vertical(vertical_constraints).split(area);
+
+    let gauge_area = main_chunks[0];
+    let lists_area = main_chunks[1];
+    let (logs_area, summary_area) = if state.has_logs() {
+        (Some(main_chunks[2]), main_chunks[3])
+    } else {
+        (None, main_chunks[2])
+    };
+
+    render_gauge(frame, state, gauge_area);
+    render_lists(frame, state, lists_area);
+    if let Some(logs_area) = logs_area {
+        render_logs(frame, state, logs_area);
+    }
+    render_summary(frame, state, summary_area);
+}
+
+fn render_gauge(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let progress_label = format!("{}/{}", state.completed, state.total_tasks);
+    let gauge = Gauge::default()
+        .block(Block::default().borders(Borders::ALL).title(" Progress "))
+        .gauge_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray))
+        .ratio(state.progress_ratio())
+        .label(progress_label);
+    frame.render_widget(gauge, area);
+}
+
+fn render_lists(frame: &mut Frame, state: &mut TuiState, area: Rect) {
+    // Horizontal split: Running (30%) | Completed (70%)
+    let [left, right] =
+        Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)]).areas(area);
+
+    render_running(frame, state, left);
+    render_completed(frame, state, right);
+}
+
+fn render_running(frame: &mut Frame, state: &TuiState, area: Rect) {
+    let title = format!(" Running ({}) ", state.running.len());
+
+    let items: Vec<ListItem> = state
+        .running
+        .iter()
+        .map(|r| {
+            ListItem::new(Line::from(vec![
+                Span::styled("● ", Style::default().fg(Color::Yellow)),
+                Span::raw(r.as_str()),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+
+    frame.render_widget(list, area);
+}
+
+fn render_completed(frame: &mut Frame, state: &mut TuiState, area: Rect) {
+    let title = format!(" Completed ({}) ", state.results.len());
+
     let header = Row::new(vec![
         Cell::from("Status"),
         Cell::from("Test"),
@@ -225,12 +344,13 @@ fn render_tests(frame: &mut Frame, state: &mut TuiState, area: Rect) {
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL).title(" Results "))
+    .block(Block::default().borders(Borders::ALL).title(title))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-    frame.render_stateful_widget(table, chunks[1], &mut state.table_state);
+    frame.render_stateful_widget(table, area, &mut state.table_state);
+}
 
-    // -- Summary bar --
+fn render_summary(frame: &mut Frame, state: &TuiState, area: Rect) {
     let summary_text = if let Some(ref s) = state.summary {
         Line::from(vec![
             Span::raw("Total: "),
@@ -264,19 +384,8 @@ fn render_tests(frame: &mut Frame, state: &mut TuiState, area: Rect) {
             Span::raw("  |  Press q to quit"),
         ])
     } else {
-        let running_text = if state.running.is_empty() {
-            "Waiting...".to_string()
-        } else {
-            let display: Vec<&str> = state.running.iter().take(3).map(|s| s.as_str()).collect();
-            let suffix = if state.running.len() > 3 {
-                format!(" +{} more", state.running.len() - 3)
-            } else {
-                String::new()
-            };
-            format!("Running: {}{}", display.join(", "), suffix)
-        };
         Line::from(vec![
-            Span::raw(running_text),
+            Span::raw(format!("{}/{}", state.completed, state.total_tasks)),
             Span::raw("  |  Press q to quit"),
         ])
     };
@@ -284,7 +393,7 @@ fn render_tests(frame: &mut Frame, state: &mut TuiState, area: Rect) {
     let summary_bar = Paragraph::new(summary_text)
         .block(Block::default().borders(Borders::ALL).title(" Summary "));
 
-    frame.render_widget(summary_bar, chunks[2]);
+    frame.render_widget(summary_bar, area);
 }
 
 fn render_logs(frame: &mut Frame, state: &TuiState, area: Rect) {
@@ -318,20 +427,26 @@ fn render_logs(frame: &mut Frame, state: &TuiState, area: Rect) {
 
 /// Run the TUI, receiving progress updates from the test runner.
 ///
-/// The TUI displays a progress gauge, a scrollable results table, and a
-/// summary bar. When a `start_command` is active, a log panel is shown on the
-/// right side. It handles keyboard input for scrolling (j/k, up/down) and
-/// quitting (q, Esc, Ctrl+C).
-///
-/// Returns the final `RunSummary` once all tests complete and the user exits.
+/// The TUI starts immediately in a "waiting for server" phase, showing a
+/// spinner and the log panel. Once `ServerReady` is received, it transitions
+/// to the normal test progress view.
 pub async fn run_tui(
     total_tasks: usize,
     rx: mpsc::UnboundedReceiver<ProgressEvent>,
     log_rx: Option<mpsc::UnboundedReceiver<String>>,
     start_command: Option<String>,
+    base_url: String,
 ) -> io::Result<RunSummary> {
     let mut terminal = ratatui::init();
-    let result = run_tui_inner(&mut terminal, total_tasks, rx, log_rx, start_command).await;
+    let result = run_tui_inner(
+        &mut terminal,
+        total_tasks,
+        rx,
+        log_rx,
+        start_command,
+        base_url,
+    )
+    .await;
     ratatui::restore();
     result
 }
@@ -342,50 +457,36 @@ async fn run_tui_inner(
     mut rx: mpsc::UnboundedReceiver<ProgressEvent>,
     mut log_rx: Option<mpsc::UnboundedReceiver<String>>,
     start_command: Option<String>,
+    base_url: String,
 ) -> io::Result<RunSummary> {
-    let mut state = TuiState::new(total_tasks, start_command);
-    let mut event_stream = EventStream::new();
+    let mut state = TuiState::new(total_tasks, start_command, base_url);
+
+    // Blocking thread for keyboard events — crossterm's EventStream doesn't
+    // work reliably with ratatui's keyboard-enhancement protocol, so we use
+    // the synchronous event::read() in a dedicated thread instead.
+    let (key_tx, mut key_rx) = mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        while let Ok(ev) = event::read() {
+            if key_tx.send(ev).is_err() {
+                break; // Receiver dropped, TUI beendet
+            }
+        }
+    });
 
     // Initial render.
     terminal.draw(|frame| render(frame, &mut state))?;
 
+    let mut rx_closed = false;
+
     loop {
         tokio::select! {
-            // Handle progress events from the runner.
-            Some(progress) = rx.recv() => {
-                let is_run_completed = matches!(&progress, ProgressEvent::RunCompleted(_));
-                state.handle_event(progress);
-                terminal.draw(|frame| render(frame, &mut state))?;
+            // Bias toward keyboard events so q/Esc always work immediately.
+            biased;
 
-                // Auto-scroll to latest result if no manual selection.
-                if !state.results.is_empty() && state.table_state.selected().is_none() {
-                    state.table_state.select(Some(state.results.len() - 1));
-                }
-
-                // If all tests are done and we have a summary, wait for user to
-                // press q before exiting. Don't auto-exit.
-                if is_run_completed {
-                    // Continue the loop to handle keyboard events.
-                }
-            }
-
-            // Handle log lines from the child process.
-            line = async {
-                match &mut log_rx {
-                    Some(rx) => rx.recv().await,
-                    None => futures::future::pending().await,
-                }
-            } => {
-                if let Some(line) = line {
-                    state.logs.push(line);
-                    terminal.draw(|frame| render(frame, &mut state))?;
-                }
-            }
-
-            // Handle keyboard events.
-            Some(Ok(event)) = event_stream.next() => {
-                if let Event::Key(key) = event
-                    && key.kind == KeyEventKind::Press {
+            // Handle keyboard and terminal events (highest priority).
+            Some(event) = key_rx.recv() => {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 return Ok(make_summary(&state, total_tasks));
@@ -404,16 +505,51 @@ async fn run_tui_inner(
                             _ => {}
                         }
                     }
+                    Event::Resize(_, _) => {
+                        terminal.draw(|frame| render(frame, &mut state))?;
+                    }
+                    _ => {}
+                }
             }
 
-            // If both channels are closed, break.
+            // Handle progress events from the runner.
+            result = rx.recv(), if !rx_closed => {
+                match result {
+                    Some(progress) => {
+                        state.handle_event(progress);
+                        terminal.draw(|frame| render(frame, &mut state))?;
+                    }
+                    None => {
+                        rx_closed = true;
+                    }
+                }
+            }
+
+            // Handle log lines from the child process.
+            result = async {
+                match &mut log_rx {
+                    Some(rx) => rx.recv().await,
+                    None => futures::future::pending().await,
+                }
+            } => {
+                match result {
+                    Some(line) => {
+                        state.logs.push(line);
+                        terminal.draw(|frame| render(frame, &mut state))?;
+                    }
+                    None => {
+                        // Channel closed, stop polling.
+                        log_rx = None;
+                    }
+                }
+            }
+
+            // All data channels closed and event stream ended.
             else => {
-                break;
+                return Ok(make_summary(&state, total_tasks));
             }
         }
     }
-
-    Ok(make_summary(&state, total_tasks))
 }
 
 fn make_summary(state: &TuiState, total_tasks: usize) -> RunSummary {

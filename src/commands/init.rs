@@ -14,7 +14,9 @@ const DEFAULT_CONFIG: &str = r#"{
     { "name": "tablet", "width": 768, "height": 1024 },
     { "name": "mobile", "width": 375, "height": 667 }
   ],
-  "snapshotDirectory": "__snapshots__",
+  "baseDirectory": "__snapshots__/__base_images__",
+  "diffDirectory": "__snapshots__/__diff__",
+  "updatedDirectory": "__snapshots__/__updated__",
   "threshold": 0,
   "retry": 1,
   "diffPixelColor": { "r": 255, "g": 0, "b": 255 }
@@ -51,8 +53,8 @@ pub fn run_init() -> anyhow::Result<()> {
     }
 
     std::fs::create_dir_all("__snapshots__/__base_images__")?;
+    std::fs::create_dir_all("__snapshots__/__diff__")?;
     std::fs::create_dir_all("__snapshots__/__updated__")?;
-    std::fs::create_dir_all("__snapshots__/__current__")?;
     println!("Created __snapshots__/ directory structure");
     println!("\nxsnap initialized! Edit xsnap.config.jsonc to get started.");
     Ok(())
