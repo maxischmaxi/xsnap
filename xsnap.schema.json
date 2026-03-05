@@ -108,7 +108,15 @@
       "type": "integer",
       "format": "uint32",
       "default": 0,
-      "minimum": 0
+      "minimum": 0,
+      "description": "Maximum number of differing pixels allowed before a test fails. The test passes if either this or thresholdPercent is satisfied."
+    },
+    "thresholdPercent": {
+      "type": "number",
+      "default": 0.5,
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Maximum percentage (0.0–100.0) of differing pixels allowed before a test fails. The test passes if either this or threshold is satisfied."
     },
     "updatedDirectory": {
       "type": "string",
@@ -567,7 +575,18 @@
           ],
           "format": "uint32",
           "default": null,
-          "minimum": 0
+          "minimum": 0,
+          "description": "Override global threshold for this test. Maximum number of differing pixels allowed."
+        },
+        "thresholdPercent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Override global thresholdPercent for this test. Maximum percentage (0.0–100.0) of differing pixels allowed."
         },
         "url": {
           "type": "string"

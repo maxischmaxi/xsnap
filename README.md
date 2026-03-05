@@ -119,8 +119,9 @@ JSONC (JSON with comments) is supported. The `$schema` field enables editor auto
   // Where snapshots are stored
   "snapshotDirectory": "__snapshots__",
 
-  // Pixel diff threshold (0 = exact match)
+  // Pixel diff thresholds (see "Thresholds" section below)
   "threshold": 0,
+  "thresholdPercent": 0.5,
 
   // Number of retries before marking a test as failed
   "retry": 1,
@@ -171,6 +172,7 @@ Test files are JSON objects with a `tests` array, discovered via `testPattern`. 
       "only": false,
       "skip": false,
       "threshold": 10,
+      "thresholdPercent": 1.0,
       "retry": 3,
       "sizes": [
         { "name": "mobile", "width": 375, "height": 667 }
@@ -202,7 +204,8 @@ Test files are JSON objects with a `tests` array, discovered via `testPattern`. 
 |-------|------|---------|-------------|
 | `name` | `string` | required | Unique test name (used in snapshot filenames) |
 | `url` | `string` | required | Path appended to `baseUrl` |
-| `threshold` | `number` | global value | Allowed pixel difference count |
+| `threshold` | `number` | global value | Allowed pixel difference count (absolute) |
+| `thresholdPercent` | `number` | global value | Allowed pixel difference percentage (0.0–100.0) |
 | `retry` | `number` | global value | Retry attempts on failure |
 | `only` | `bool` | `false` | When any test has `only: true`, only those run |
 | `skip` | `bool` | `false` | Skip this test |
@@ -239,6 +242,82 @@ Actions run sequentially before each screenshot. All actions support an optional
 // Size restriction: only execute on specific viewports
 { "action": "click", "selector": "#mobile-menu", "@": ["mobile"] }
 ```
+
+## Thresholds
+
+xsnap uses two complementary thresholds to decide whether a screenshot matches its baseline. A test **passes** when **either** threshold is satisfied.
+
+### `threshold` (absolute pixel count)
+
+Maximum number of differing pixels allowed. Default: `0`.
+
+Useful when you know the exact pixel budget for a specific test — for example, a small animation or cursor blink might produce a fixed number of changed pixels.
+
+### `thresholdPercent` (percentage)
+
+Maximum percentage of differing pixels allowed (0.0–100.0). Default: `0.5` (0.5%).
+
+Scales automatically with image size, which makes it the better choice for most projects. A 1920x1080 screenshot (2M pixels) tolerates ~10,000 pixel differences at 0.5%, while a 375x667 mobile screenshot (250K pixels) tolerates ~1,250 — both appropriate for typical font antialiasing variance.
+
+### How they interact
+
+The test passes if **either** condition is met:
+
+```text
+diff_pixels <= threshold   →  PASS
+diff_percent <= thresholdPercent  →  PASS
+both exceeded  →  FAIL
+```
+
+With the defaults (`threshold: 0`, `thresholdPercent: 0.5`), any image with less than 0.5% pixel difference passes. Set both to `0` for exact-match comparison.
+
+### Per-test overrides
+
+Both thresholds can be configured globally in `xsnap.config.jsonc` and overridden per test in individual test files. Test-level values take precedence over global values.
+
+```jsonc
+// xsnap.config.jsonc — global defaults
+{
+  "threshold": 0,
+  "thresholdPercent": 0.5
+}
+```
+
+```jsonc
+// tests/animation.xsnap.jsonc — stricter for pixel-precise components
+{
+  "tests": [
+    {
+      "name": "icon-grid",
+      "url": "/icons",
+      "threshold": 0,
+      "thresholdPercent": 0.0
+    }
+  ]
+}
+```
+
+```jsonc
+// tests/content-page.xsnap.jsonc — more lenient for text-heavy pages
+{
+  "tests": [
+    {
+      "name": "blog-post",
+      "url": "/blog/hello-world",
+      "thresholdPercent": 1.0
+    }
+  ]
+}
+```
+
+### Best Practices
+
+- **Start with the default** (`thresholdPercent: 0.5`). This tolerates font antialiasing and subpixel rendering differences that are invisible to the human eye.
+- **Use `thresholdPercent` over `threshold`** for most tests. It scales with image size and is easier to reason about.
+- **Use `threshold` (absolute)** only when you need precise pixel-level control, e.g. for icon or SVG rendering tests.
+- **Tighten per test, not globally.** Keep a reasonable global default and override with stricter values for pixel-critical components.
+- **If tests flake on CI but pass locally**, increase `thresholdPercent` slightly (e.g. to `1.0`) rather than disabling the test. CI environments often render fonts differently.
+- **Never set `thresholdPercent` above `5.0`** unless you have a specific reason. At that level, real visual regressions may go undetected.
 
 ## Commands
 

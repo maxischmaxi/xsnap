@@ -28,6 +28,7 @@ pub struct TestTask {
     pub base_url: String,
     pub full_screen: bool,
     pub threshold: u32,
+    pub threshold_percent: f64,
     pub retry: u32,
     pub base_dir: PathBuf,
     pub diff_dir: PathBuf,
@@ -136,6 +137,7 @@ pub fn build_test_tasks(
     for test in tests {
         let sizes = test.sizes.as_ref().unwrap_or(&global_sizes);
         let threshold = test.threshold.unwrap_or(global.threshold);
+        let threshold_percent = test.threshold_percent.unwrap_or(global.threshold_percent);
         let retry = test.retry.unwrap_or(global.retry);
 
         // Merge HTTP headers: global first, then test overrides.
@@ -167,6 +169,7 @@ pub fn build_test_tasks(
                 base_url: global.base_url.clone(),
                 full_screen: global.full_screen,
                 threshold,
+                threshold_percent,
                 retry,
                 base_dir: PathBuf::from(&global.base_directory),
                 diff_dir: PathBuf::from(&global.diff_directory),
@@ -234,7 +237,8 @@ pub async fn execute_test_task(pool: &BrowserPool, task: &TestTask, no_create: b
         }
 
         match execute_single_attempt(pool, task, &snapshot_path, &diff_path, no_create).await {
-            Ok(outcome) => {
+            Ok((outcome, compare_warnings)) => {
+                warnings.extend(compare_warnings);
                 if outcome.is_pass() || attempt == task.retry {
                     last_outcome = outcome;
                     break;
@@ -279,10 +283,11 @@ fn process_images(
     diff_path: PathBuf,
     updated_dir: PathBuf,
     threshold: u32,
+    threshold_percent: f64,
     test_name: &str,
     size: &Size,
     no_create: bool,
-) -> Result<TestOutcome, XsnapError> {
+) -> Result<(TestOutcome, Vec<String>), XsnapError> {
     // Decode screenshot into an image.
     let current_img = image::load_from_memory(&screenshot_bytes)
         .map_err(|e| XsnapError::ScreenshotFailed {
@@ -293,12 +298,15 @@ fn process_images(
     // Check if baseline exists.
     if !snapshot_path.exists() {
         if no_create {
-            return Ok(TestOutcome::Error {
-                message: format!(
-                    "No baseline snapshot exists and --no-create is set: {}",
-                    snapshot_path.display()
-                ),
-            });
+            return Ok((
+                TestOutcome::Error {
+                    message: format!(
+                        "No baseline snapshot exists and --no-create is set: {}",
+                        snapshot_path.display()
+                    ),
+                },
+                vec![],
+            ));
         }
 
         // Create base directory if needed.
@@ -315,7 +323,7 @@ fn process_images(
                 message: format!("Failed to save snapshot: {}", e),
             })?;
 
-        return Ok(TestOutcome::Created);
+        return Ok((TestOutcome::Created, vec![]));
     }
 
     // Load baseline image.
@@ -330,8 +338,10 @@ fn process_images(
         .to_rgb8();
 
     // Compare images.
-    match compare_images(&baseline_img, &current_img, threshold)? {
-        CompareResult::Pass => Ok(TestOutcome::Pass),
+    let (compare_result, compare_warnings) =
+        compare_images(&baseline_img, &current_img, threshold, threshold_percent)?;
+    match compare_result {
+        CompareResult::Pass => Ok((TestOutcome::Pass, compare_warnings)),
         CompareResult::Fail { score, diff_image } => {
             // Ensure diff directory exists.
             if let Some(parent) = diff_path.parent() {
@@ -360,10 +370,13 @@ fn process_images(
                 eprintln!("Warning: failed to save updated screenshot: {}", e);
             }
 
-            Ok(TestOutcome::Fail {
-                score,
-                diff_path: diff_path_str,
-            })
+            Ok((
+                TestOutcome::Fail {
+                    score,
+                    diff_path: diff_path_str,
+                },
+                compare_warnings,
+            ))
         }
     }
 }
@@ -375,7 +388,7 @@ async fn execute_single_attempt(
     snapshot_path: &Path,
     diff_path: &Path,
     no_create: bool,
-) -> Result<TestOutcome, XsnapError> {
+) -> Result<(TestOutcome, Vec<String>), XsnapError> {
     // Acquire a page from the pool.
     let (page, _permit) = pool.acquire().await?;
 
@@ -425,6 +438,7 @@ async fn execute_single_attempt(
     let diff_path = diff_path.to_path_buf();
     let updated_dir = task.updated_dir.clone();
     let threshold = task.threshold;
+    let threshold_percent = task.threshold_percent;
     let test_name = task.test.name.clone();
     let size = task.size.clone();
 
@@ -435,6 +449,7 @@ async fn execute_single_attempt(
             diff_path,
             updated_dir,
             threshold,
+            threshold_percent,
             &test_name,
             &size,
             no_create,
@@ -671,6 +686,7 @@ mod tests {
             diff_directory: "__snapshots__/__diff__".into(),
             updated_directory: "__snapshots__/__updated__".into(),
             threshold: 10,
+            threshold_percent: 0.5,
             retry: 2,
             parallelism: None,
             diff_pixel_color: crate::config::types::Color {
@@ -687,6 +703,7 @@ mod tests {
             name: "homepage".into(),
             url: "/".into(),
             threshold: None,
+            threshold_percent: None,
             retry: None,
             only: false,
             skip: false,
@@ -728,6 +745,7 @@ mod tests {
             diff_directory: "__snapshots__/__diff__".into(),
             updated_directory: "__snapshots__/__updated__".into(),
             threshold: 10,
+            threshold_percent: 0.5,
             retry: 2,
             parallelism: None,
             diff_pixel_color: crate::config::types::Color {
@@ -748,6 +766,7 @@ mod tests {
             name: "login".into(),
             url: "/login".into(),
             threshold: Some(5),
+            threshold_percent: None,
             retry: Some(3),
             only: false,
             skip: false,
@@ -793,6 +812,7 @@ mod tests {
             diff_directory: "__snapshots__/__diff__".into(),
             updated_directory: "__snapshots__/__updated__".into(),
             threshold: 0,
+            threshold_percent: 0.5,
             retry: 1,
             parallelism: None,
             diff_pixel_color: crate::config::types::Color {
@@ -809,6 +829,7 @@ mod tests {
             name: "test".into(),
             url: "/test".into(),
             threshold: None,
+            threshold_percent: None,
             retry: None,
             only: false,
             skip: false,
@@ -935,6 +956,7 @@ mod tests {
             diff_directory: "__snapshots__/__diff__".into(),
             updated_directory: "__snapshots__/__updated__".into(),
             threshold: 0,
+            threshold_percent: 0.5,
             retry: 1,
             parallelism: None,
             diff_pixel_color: crate::config::types::Color {
@@ -952,6 +974,7 @@ mod tests {
                 name: "default-test".into(),
                 url: "/".into(),
                 threshold: None,
+                threshold_percent: None,
                 retry: None,
                 only: false,
                 skip: false,
@@ -966,6 +989,7 @@ mod tests {
                 name: "german-test".into(),
                 url: "/de".into(),
                 threshold: None,
+                threshold_percent: None,
                 retry: None,
                 only: false,
                 skip: false,
@@ -984,6 +1008,7 @@ mod tests {
                 name: "also-default".into(),
                 url: "/about".into(),
                 threshold: None,
+                threshold_percent: None,
                 retry: None,
                 only: false,
                 skip: false,

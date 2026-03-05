@@ -18,6 +18,7 @@ const DEFAULT_CONFIG: &str = r#"{
   "diffDirectory": "__snapshots__/__diff__",
   "updatedDirectory": "__snapshots__/__updated__",
   "threshold": 0,
+  "thresholdPercent": 0.5,
   "retry": 1,
   "diffPixelColor": { "r": 255, "g": 0, "b": 255 }
 }

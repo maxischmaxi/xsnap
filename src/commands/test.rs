@@ -34,6 +34,15 @@ pub async fn run_test(opts: TestOptions) -> anyhow::Result<i32> {
     let config_path = Path::new(&opts.config);
     let global = load_global_config(config_path)?;
 
+    // Clear diff and updated directories before test run.
+    for dir in [&global.diff_directory, &global.updated_directory] {
+        let path = Path::new(dir);
+        if path.exists() {
+            std::fs::remove_dir_all(path)?;
+            std::fs::create_dir_all(path)?;
+        }
+    }
+
     // 2. Discover and load test files.
     let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let test_files = discover_test_files(base_dir, &global.test_pattern, &global.ignore_patterns)?;
@@ -308,6 +317,7 @@ mod tests {
             name: name.to_string(),
             url: "/".to_string(),
             threshold: None,
+            threshold_percent: None,
             retry: None,
             only,
             skip,

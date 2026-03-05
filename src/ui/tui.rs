@@ -1,4 +1,6 @@
 use std::io;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -226,7 +228,9 @@ fn render_waiting(frame: &mut Frame, state: &mut TuiState) {
     // Summary bar.
     let summary_text = Line::from(vec![
         Span::styled("Waiting for server", Style::default().fg(Color::Yellow)),
-        Span::raw("  |  Press q to quit"),
+        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::styled(" quit", Style::default().fg(Color::DarkGray)),
     ]);
     let summary_bar = Paragraph::new(summary_text)
         .block(Block::default().borders(Borders::ALL).title(" Summary "));
@@ -362,15 +366,31 @@ fn render_completed(frame: &mut Frame, state: &mut TuiState, area: Rect) {
             Cell::from(retry_str),
         ]));
 
-        if let TestOutcome::Error { message } = &r.outcome {
+        // Show warnings as sublines (yellow).
+        for warning in &r.warnings {
             rows.push(Row::new(vec![
                 Cell::from(""),
-                Cell::from(format!("\u{2192} {}", message))
-                    .style(Style::default().fg(Color::DarkGray)),
+                Cell::from(format!("\u{26a0} {}", warning))
+                    .style(Style::default().fg(Color::Yellow)),
                 Cell::from(""),
                 Cell::from(""),
                 Cell::from(""),
             ]));
+        }
+
+        // Show error message as sublines (gray). Split long messages into
+        // multiple lines so nothing is truncated.
+        if let TestOutcome::Error { message } = &r.outcome {
+            for line in message.lines() {
+                rows.push(Row::new(vec![
+                    Cell::from(""),
+                    Cell::from(format!("\u{2192} {}", line))
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                ]));
+            }
         }
     }
 
@@ -429,12 +449,24 @@ fn render_summary(frame: &mut Frame, state: &TuiState, area: Rect) {
                 Style::default().fg(Color::Red),
             ),
             Span::raw(format!("  ({:.1}s)", s.duration.as_secs_f64())),
-            Span::raw("  |  Press q to quit"),
+            Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::Yellow)),
+            Span::styled(" scroll  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ctrl+d/u", Style::default().fg(Color::Yellow)),
+            Span::styled(" half-page  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::styled(" quit", Style::default().fg(Color::DarkGray)),
         ])
     } else {
         Line::from(vec![
             Span::raw(format!("{}/{}", state.completed, state.total_tasks)),
-            Span::raw("  |  Press q to quit"),
+            Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("j/k", Style::default().fg(Color::Yellow)),
+            Span::styled(" scroll  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ctrl+d/u", Style::default().fg(Color::Yellow)),
+            Span::styled(" half-page  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().fg(Color::Yellow)),
+            Span::styled(" quit", Style::default().fg(Color::DarkGray)),
         ])
     };
 
@@ -486,15 +518,48 @@ pub async fn run_tui(
     base_url: String,
 ) -> io::Result<RunSummary> {
     let mut terminal = ratatui::init();
+
+    // Blocking thread for keyboard events — crossterm's EventStream doesn't
+    // work reliably with ratatui's keyboard-enhancement protocol, so we use
+    // the synchronous event::poll() + event::read() in a dedicated thread.
+    // The shutdown flag ensures the thread exits cleanly so crossterm's
+    // internal state is properly dropped before process exit.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_flag = shutdown.clone();
+    let (key_tx, mut key_rx) = mpsc::unbounded_channel();
+    let key_thread = std::thread::spawn(move || {
+        while !shutdown_flag.load(Ordering::Relaxed) {
+            // Poll with a short timeout so we can check the shutdown flag.
+            if event::poll(Duration::from_millis(100)).unwrap_or(false) {
+                match event::read() {
+                    Ok(ev) => {
+                        if key_tx.send(ev).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+    });
+
     let result = run_tui_inner(
         &mut terminal,
         total_tasks,
         rx,
+        &mut key_rx,
         log_rx,
         start_command,
         base_url,
     )
     .await;
+
+    // Signal the keyboard thread to stop, then wait for it to exit cleanly
+    // before restoring the terminal. This ensures crossterm's internal event
+    // reader is fully dropped.
+    shutdown.store(true, Ordering::Relaxed);
+    let _ = key_thread.join();
+
     ratatui::restore();
     result
 }
@@ -503,23 +568,12 @@ async fn run_tui_inner(
     terminal: &mut DefaultTerminal,
     total_tasks: usize,
     mut rx: mpsc::UnboundedReceiver<ProgressEvent>,
+    key_rx: &mut mpsc::UnboundedReceiver<Event>,
     mut log_rx: Option<mpsc::UnboundedReceiver<String>>,
     start_command: Option<String>,
     base_url: String,
 ) -> io::Result<RunSummary> {
     let mut state = TuiState::new(total_tasks, start_command, base_url);
-
-    // Blocking thread for keyboard events — crossterm's EventStream doesn't
-    // work reliably with ratatui's keyboard-enhancement protocol, so we use
-    // the synchronous event::read() in a dedicated thread instead.
-    let (key_tx, mut key_rx) = mpsc::unbounded_channel();
-    std::thread::spawn(move || {
-        while let Ok(ev) = event::read() {
-            if key_tx.send(ev).is_err() {
-                break; // Receiver dropped, TUI beendet
-            }
-        }
-    });
 
     // Initial render.
     terminal.draw(|frame| render(frame, &mut state))?;

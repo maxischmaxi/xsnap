@@ -26,8 +26,14 @@ pub fn format_result_line(result: &TestResult) -> String {
         retries,
     );
 
+    for warning in &result.warnings {
+        line.push_str(&format!("\n       ⚠ {}", warning));
+    }
+
     if let TestOutcome::Error { message } = &result.outcome {
-        line.push_str(&format!("\n       → {}", message));
+        for msg_line in message.lines() {
+            line.push_str(&format!("\n       → {}", msg_line));
+        }
     }
 
     line

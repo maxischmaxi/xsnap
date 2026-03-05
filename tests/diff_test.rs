@@ -13,18 +13,20 @@ fn create_solid_image(width: u32, height: u32, color: [u8; 3]) -> RgbImage {
 #[test]
 fn test_identical_images_pass() {
     let img = create_solid_image(100, 100, [128, 128, 128]);
-    let result = compare_images(&img, &img, 0).expect("comparison should succeed");
+    let (result, warnings) = compare_images(&img, &img, 0, 0.0).expect("comparison should succeed");
     assert!(
         matches!(result, CompareResult::Pass),
         "identical images should pass with threshold 0"
     );
+    assert!(warnings.is_empty());
 }
 
 #[test]
 fn test_different_images_fail() {
     let baseline = create_solid_image(100, 100, [0, 0, 0]);
     let current = create_solid_image(100, 100, [255, 255, 255]);
-    let result = compare_images(&baseline, &current, 0).expect("comparison should succeed");
+    let (result, _) =
+        compare_images(&baseline, &current, 0, 0.0).expect("comparison should succeed");
     match result {
         CompareResult::Fail { score, diff_image } => {
             assert!(
@@ -48,7 +50,8 @@ fn test_threshold_allows_small_diff() {
     }
 
     // First verify that a threshold of 0 detects the difference
-    let strict_result = compare_images(&baseline, &current, 0).expect("comparison should succeed");
+    let (strict_result, _) =
+        compare_images(&baseline, &current, 0, 0.0).expect("comparison should succeed");
     let diff_pixel_count = match &strict_result {
         CompareResult::Fail { score, .. } => {
             let total = 100u32 * 100;
@@ -61,8 +64,8 @@ fn test_threshold_allows_small_diff() {
     // MSSIM works on windows so the affected pixel count may be larger
     // than the literal number of changed pixels.
     let generous_threshold = diff_pixel_count + 50;
-    let result =
-        compare_images(&baseline, &current, generous_threshold).expect("comparison should succeed");
+    let (result, _) = compare_images(&baseline, &current, generous_threshold, 0.0)
+        .expect("comparison should succeed");
     assert!(
         matches!(result, CompareResult::Pass),
         "small diff within generous threshold should pass, diff_pixel_count was {}",
@@ -71,17 +74,82 @@ fn test_threshold_allows_small_diff() {
 }
 
 #[test]
-fn test_dimension_mismatch() {
-    let small = create_solid_image(50, 50, [128, 128, 128]);
-    let large = create_solid_image(100, 100, [128, 128, 128]);
-    let result = compare_images(&small, &large, 0);
-    assert!(result.is_err(), "dimension mismatch should return error");
-    let err = result.unwrap_err();
-    let msg = format!("{}", err);
+fn test_dimension_mismatch_width_warns() {
+    let narrow = create_solid_image(50, 100, [128, 128, 128]);
+    let wide = create_solid_image(100, 100, [128, 128, 128]);
+    let (result, warnings) =
+        compare_images(&narrow, &wide, 0, 0.0).expect("width mismatch should not error");
+    // Should still produce a comparison result (not an error).
     assert!(
-        msg.contains("Dimension mismatch"),
-        "error message should mention dimension mismatch, got: {}",
-        msg
+        matches!(result, CompareResult::Pass | CompareResult::Fail { .. }),
+        "width mismatch should produce a comparison result"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("Width mismatch")),
+        "should warn about width mismatch, got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_dimension_mismatch_height_no_warning() {
+    let short = create_solid_image(100, 50, [128, 128, 128]);
+    let tall = create_solid_image(100, 100, [128, 128, 128]);
+    let (_, warnings) =
+        compare_images(&short, &tall, 0, 0.0).expect("height mismatch should not error");
+    assert!(
+        warnings.is_empty(),
+        "height-only mismatch should not produce warnings, got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_threshold_percent_allows_small_diff() {
+    let baseline = create_solid_image(100, 100, [128, 128, 128]);
+    let current = create_solid_image(100, 100, [255, 255, 255]);
+
+    // With 0% tolerance both thresholds reject
+    let (strict, _) =
+        compare_images(&baseline, &current, 0, 0.0).expect("comparison should succeed");
+    assert!(
+        matches!(strict, CompareResult::Fail { .. }),
+        "completely different images should fail with 0% threshold"
+    );
+
+    // With 100% tolerance the percent threshold lets it pass
+    let (lenient, _) =
+        compare_images(&baseline, &current, 0, 100.0).expect("comparison should succeed");
+    assert!(
+        matches!(lenient, CompareResult::Pass),
+        "100% threshold should let anything pass"
+    );
+}
+
+#[test]
+fn test_threshold_percent_either_threshold_passes() {
+    let mut baseline = create_solid_image(100, 100, [128, 128, 128]);
+    let current = baseline.clone();
+
+    // Modify a few pixels
+    for x in 0..5 {
+        baseline.put_pixel(x, 0, Rgb([0, 0, 0]));
+    }
+
+    // Pixel threshold 0, percent threshold 0 → should fail
+    let (result, _) =
+        compare_images(&baseline, &current, 0, 0.0).expect("comparison should succeed");
+    assert!(
+        matches!(result, CompareResult::Fail { .. }),
+        "both thresholds at 0 should fail"
+    );
+
+    // Pixel threshold 0, percent threshold generous → should pass via percent
+    let (result, _) =
+        compare_images(&baseline, &current, 0, 5.0).expect("comparison should succeed");
+    assert!(
+        matches!(result, CompareResult::Pass),
+        "generous percent threshold should pass even with pixel threshold 0"
     );
 }
 

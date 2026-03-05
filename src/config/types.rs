@@ -42,6 +42,9 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub threshold: u32,
 
+    #[serde(default = "default_threshold_percent")]
+    pub threshold_percent: f64,
+
     #[serde(default = "default_retry")]
     pub retry: u32,
 
@@ -164,6 +167,9 @@ pub struct TestConfig {
 
     #[serde(default)]
     pub threshold: Option<u32>,
+
+    #[serde(default)]
+    pub threshold_percent: Option<f64>,
 
     #[serde(default)]
     pub retry: Option<u32>,
@@ -299,6 +305,10 @@ fn default_updated_dir() -> String {
 
 fn default_retry() -> u32 {
     1
+}
+
+fn default_threshold_percent() -> f64 {
+    0.5
 }
 
 fn default_diff_color() -> Color {
